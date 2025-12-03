@@ -44,6 +44,8 @@ export interface TypographyStyle {
   color: string;
   textTransform: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
   textDecoration: 'none' | 'underline' | 'line-through';
+  widows?: number; // New: prevent lonely lines at top of page
+  orphans?: number; // New: prevent lonely lines at bottom of page
 }
 
 export interface BoxStyle {
@@ -60,6 +62,7 @@ export interface BoxStyle {
   backgroundColor: string;
   opacity: number;
   filter: string; // New: CSS Filter support (e.g., grayscale)
+  objectFit?: 'fill' | 'contain' | 'cover' | 'none' | 'scale-down'; // Added for Image element sizing
 }
 
 export interface PageElement {

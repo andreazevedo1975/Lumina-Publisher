@@ -1,6 +1,6 @@
 
 import React, { useRef, useState, useEffect } from 'react';
-import { Project, Page, MasterPage, PageElement, ViewMode } from '../types';
+import { Project, Page, MasterPage, PageElement, ViewMode, ElementType } from '../types';
 import { Icons } from './Icon';
 
 interface EditorCanvasProps {
@@ -12,6 +12,7 @@ interface EditorCanvasProps {
   onEditStart: (id: string | null) => void;
   onElementSelect: (id: string | null) => void;
   onElementUpdate: (id: string, updates: Partial<PageElement>) => void;
+  onRemoveElement: (id: string) => void;
 }
 
 const EditorCanvas: React.FC<EditorCanvasProps> = ({ 
@@ -22,11 +23,13 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   editingId,
   onEditStart,
   onElementSelect,
-  onElementUpdate 
+  onElementUpdate,
+  onRemoveElement
 }) => {
   // Start with 60% zoom to ensure visibility on smaller screens
   const [zoom, setZoom] = useState(0.6);
   const containerRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Element Dragging State
   const [isDragging, setIsDragging] = useState(false);
@@ -64,6 +67,21 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     setIsDragging(false);
   };
 
+  // Keyboard listener for deletion
+  useEffect(() => {
+      const handleKeyDown = (e: KeyboardEvent) => {
+          // If editing text, do not delete element on backspace/delete
+          if (editingId) return;
+
+          if (project.activeElementId && (e.key === 'Delete' || e.key === 'Backspace')) {
+              onRemoveElement(project.activeElementId);
+          }
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [project.activeElementId, editingId, onRemoveElement]);
+
   useEffect(() => {
     if (isDragging) {
       window.addEventListener('mouseup', handleMouseUp);
@@ -84,21 +102,112 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   }, [editingId]);
 
   // --- WYSIWYG COMMANDS ---
-  const executeCommand = (command: string) => {
-    document.execCommand(command, false, undefined);
+  const executeCommand = (command: string, value?: string) => {
+    document.execCommand(command, false, value);
+    // Force focus back to keep selection
+    if (editingId) {
+        const el = document.getElementById(`editable-${editingId}`);
+        el?.focus();
+    }
   };
 
   const FloatingToolbar = ({ elementId }: { elementId: string }) => (
       <div 
-        className="absolute -top-12 left-0 z-[100] flex bg-slate-900 border border-slate-700 rounded shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+        className="absolute -top-24 left-0 z-[100] flex flex-col bg-white border border-slate-200 rounded-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
         onMouseDown={(e) => e.preventDefault()} // Prevent focus loss
       >
-          <button onClick={() => executeCommand('bold')} className="p-2 hover:bg-slate-800 text-slate-300 hover:text-white border-r border-slate-700" title="Negrito"><Icons.Bold size={14} /></button>
-          <button onClick={() => executeCommand('italic')} className="p-2 hover:bg-slate-800 text-slate-300 hover:text-white border-r border-slate-700" title="Itálico"><Icons.Italic size={14} /></button>
-          <button onClick={() => executeCommand('underline')} className="p-2 hover:bg-slate-800 text-slate-300 hover:text-white" title="Sublinhado"><Icons.Underline size={14} /></button>
+          {/* Top Row: Styles & Basic Formatting */}
+          <div className="flex items-center gap-1 p-1 border-b border-slate-100 bg-slate-50">
+             <button onClick={() => executeCommand('formatBlock', 'H1')} className="p-1.5 hover:bg-slate-200 rounded text-slate-700" title="Título 1"><Icons.Heading1 size={16} /></button>
+             <button onClick={() => executeCommand('formatBlock', 'H2')} className="p-1.5 hover:bg-slate-200 rounded text-slate-700" title="Título 2"><Icons.Heading2 size={16} /></button>
+             <button onClick={() => executeCommand('formatBlock', 'P')} className="p-1.5 hover:bg-slate-200 rounded text-slate-700" title="Parágrafo"><Icons.Pilcrow size={16} /></button>
+             <div className="w-[1px] h-4 bg-slate-300 mx-1"></div>
+             <button onClick={() => executeCommand('bold')} className="p-1.5 hover:bg-slate-200 rounded text-slate-700 font-bold" title="Negrito"><Icons.Bold size={16} /></button>
+             <button onClick={() => executeCommand('italic')} className="p-1.5 hover:bg-slate-200 rounded text-slate-700 italic" title="Itálico"><Icons.Italic size={16} /></button>
+             <button onClick={() => executeCommand('underline')} className="p-1.5 hover:bg-slate-200 rounded text-slate-700 underline" title="Sublinhado"><Icons.Underline size={16} /></button>
+             <button onClick={() => executeCommand('removeFormat')} className="p-1.5 hover:bg-red-100 text-slate-500 hover:text-red-600 rounded ml-1" title="Limpar Formatação"><Icons.Eraser size={16} /></button>
+          </div>
+
+          {/* Bottom Row: Alignment & Lists */}
+          <div className="flex items-center gap-1 p-1 bg-white">
+             <button onClick={() => executeCommand('justifyLeft')} className="p-1.5 hover:bg-slate-200 rounded text-slate-700" title="Alinhar à Esquerda"><Icons.AlignLeft size={16} /></button>
+             <button onClick={() => executeCommand('justifyCenter')} className="p-1.5 hover:bg-slate-200 rounded text-slate-700" title="Centralizar"><Icons.AlignCenter size={16} /></button>
+             <button onClick={() => executeCommand('justifyRight')} className="p-1.5 hover:bg-slate-200 rounded text-slate-700" title="Alinhar à Direita"><Icons.AlignRight size={16} /></button>
+             <button onClick={() => executeCommand('justifyFull')} className="p-1.5 hover:bg-slate-200 rounded text-slate-700" title="Justificar"><Icons.AlignJustify size={16} /></button>
+             <div className="w-[1px] h-4 bg-slate-300 mx-1"></div>
+             <button onClick={() => executeCommand('insertUnorderedList')} className="p-1.5 hover:bg-slate-200 rounded text-slate-700" title="Lista com Marcadores"><Icons.List size={16} /></button>
+             <button onClick={() => executeCommand('insertOrderedList')} className="p-1.5 hover:bg-slate-200 rounded text-slate-700" title="Lista Numerada"><Icons.ListOrdered size={16} /></button>
+             <div className="w-[1px] h-4 bg-slate-300 mx-1"></div>
+             <button onClick={() => executeCommand('outdent')} className="p-1.5 hover:bg-slate-200 rounded text-slate-700" title="Diminuir Recuo"><Icons.Outdent size={16} /></button>
+             <button onClick={() => executeCommand('indent')} className="p-1.5 hover:bg-slate-200 rounded text-slate-700" title="Aumentar Recuo"><Icons.Indent size={16} /></button>
+          </div>
       </div>
   );
 
+  const SelectionToolbar = ({ elementId, type }: { elementId: string, type: ElementType }) => (
+      <div className="absolute -top-8 left-0 z-50 flex gap-2">
+           {type === 'TEXT' && (
+                <button 
+                  onClick={(e) => { e.stopPropagation(); onEditStart(elementId); }}
+                  className="bg-blue-600 text-white text-[10px] px-2 py-1 rounded shadow flex items-center gap-1 hover:bg-blue-500"
+                >
+                    <Icons.Edit size={10} /> Editar
+                </button>
+           )}
+           <button 
+              onClick={(e) => { e.stopPropagation(); onRemoveElement(elementId); }}
+              className="bg-red-600 text-white text-[10px] px-2 py-1 rounded shadow flex items-center gap-1 hover:bg-red-500"
+              title="Excluir Elemento (Del)"
+           >
+               <Icons.Trash2 size={10} />
+           </button>
+      </div>
+  );
+
+  const ImageToolbar = ({ elementId, element }: { elementId: string, element: PageElement }) => {
+      const handleSwap = (e: React.ChangeEvent<HTMLInputElement>) => {
+          if (e.target.files?.[0]) {
+              const reader = new FileReader();
+              reader.onload = (evt) => {
+                  if (evt.target?.result) {
+                      onElementUpdate(elementId, { content: evt.target.result as string });
+                  }
+              };
+              reader.readAsDataURL(e.target.files[0]);
+          }
+      };
+
+      const toggleFit = () => {
+          const nextFit = element.style.objectFit === 'contain' ? 'cover' : 'contain'; // Simple toggle for now
+          // Type casting for simple update 
+          onElementUpdate(elementId, { style: { ...element.style, objectFit: nextFit } } as any);
+      };
+
+      const toggleGray = () => {
+          const isGray = element.style.filter?.includes('grayscale');
+          onElementUpdate(elementId, { style: { ...element.style, filter: isGray ? 'none' : 'grayscale(100%)' } } as any);
+      }
+
+      return (
+          <div 
+             className="absolute -top-12 left-0 z-[100] flex bg-slate-900 border border-slate-700 rounded shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 items-center"
+             onMouseDown={(e) => e.preventDefault()}
+          >
+              <button onClick={() => fileInputRef.current?.click()} className="p-2 hover:bg-slate-800 text-slate-300 hover:text-white border-r border-slate-700 flex items-center gap-1" title="Trocar Imagem">
+                  <Icons.RefreshCw size={14} /> <span className="text-[10px]">Trocar</span>
+              </button>
+              <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleSwap} />
+              
+              <button onClick={toggleFit} className="p-2 hover:bg-slate-800 text-slate-300 hover:text-white border-r border-slate-700 flex items-center gap-1" title="Ajuste (Cover/Contain)">
+                  <Icons.Move size={14} /> <span className="text-[10px]">{element.style.objectFit === 'contain' ? 'Ajustar' : 'Preencher'}</span>
+              </button>
+
+              <button onClick={toggleGray} className="p-2 hover:bg-slate-800 text-slate-300 hover:text-white flex items-center gap-1" title="P&B">
+                  <Icons.Palette size={14} /> <span className="text-[10px]">P&B</span>
+              </button>
+          </div>
+      )
+  };
 
   // Rendering an individual element
   const renderElement = (el: PageElement, isMaster: boolean = false, pageIndex?: number) => {
@@ -155,6 +264,8 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
       textAlign: el.style.textAlign,
       hyphens: el.style.hyphens,
       color: el.style.color,
+      widows: el.style.widows,
+      orphans: el.style.orphans,
       
       zIndex: isSelected || isEditing ? 100 : 1,
       opacity: isMaster ? 0.5 : el.style.opacity,
@@ -173,25 +284,24 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
         className={`group ${isSelected && !isEditing ? 'ring-2 ring-blue-500' : 'hover:ring-1 hover:ring-blue-300'}`}
         onMouseDown={(e) => !isMaster && handleMouseDown(e, el)}
         onDoubleClick={(e) => {
-            if (!isMaster && el.type === 'TEXT') {
+            if (!isMaster) {
                 e.stopPropagation();
-                onEditStart(el.id);
-                setIsDragging(false);
+                if (el.type === 'TEXT') {
+                    onEditStart(el.id);
+                    setIsDragging(false);
+                } else if (el.type === 'IMAGE') {
+                    onEditStart(el.id); // Trigger Image Toolbar
+                }
             }
         }}
       >
-        {/* EDITING TOOLBAR */}
-        {isEditing && <FloatingToolbar elementId={el.id} />}
+        {/* EDITING TOOLBARS */}
+        {isEditing && el.type === 'TEXT' && <FloatingToolbar elementId={el.id} />}
+        {isEditing && el.type === 'IMAGE' && <ImageToolbar elementId={el.id} element={el} />}
 
-        {isSelected && !isEditing && el.type === 'TEXT' && (
-           <div className="absolute -top-8 left-0 z-50">
-               <button 
-                  onClick={() => onEditStart(el.id)}
-                  className="bg-blue-600 text-white text-[10px] px-2 py-1 rounded shadow flex items-center gap-1 hover:bg-blue-500"
-               >
-                   <Icons.Edit size={10} /> Editar Texto
-               </button>
-           </div>
+        {/* SELECTION TOOLBAR (Delete/Edit buttons) */}
+        {isSelected && !isEditing && (
+            <SelectionToolbar elementId={el.id} type={el.type} />
         )}
 
         {el.type === 'TEXT' && (
@@ -216,7 +326,12 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
            />
         )}
         {el.type === 'IMAGE' && (
-           <img src={el.content} alt={el.altText} className="w-full h-full object-cover pointer-events-none" />
+           <img 
+               src={el.content} 
+               alt={el.altText} 
+               className="w-full h-full pointer-events-none" 
+               style={{ objectFit: (el.style as any).objectFit || 'cover' }}
+           />
         )}
         
         {/* Resize Handles (Visual Only for this demo, hidden while editing text) */}

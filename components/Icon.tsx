@@ -36,7 +36,15 @@ import {
   Loader2,
   Workflow,
   PanelTop,
-  PanelBottom
+  PanelBottom,
+  Heading1,
+  Heading2,
+  Pilcrow,
+  List,
+  ListOrdered,
+  Indent,
+  Outdent,
+  Eraser
 } from 'lucide-react';
 
 export const Icons = {
@@ -76,5 +84,13 @@ export const Icons = {
   Loader2,
   Workflow,
   PanelTop,
-  PanelBottom
+  PanelBottom,
+  Heading1,
+  Heading2,
+  Pilcrow,
+  List,
+  ListOrdered,
+  Indent,
+  Outdent,
+  Eraser
 };

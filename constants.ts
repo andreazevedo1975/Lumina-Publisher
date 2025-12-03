@@ -19,6 +19,8 @@ export const DEFAULT_TYPOGRAPHY: TypographyStyle = {
   color: '#1e293b', // slate-800
   textTransform: 'none',
   textDecoration: 'none',
+  widows: 2,
+  orphans: 2,
 };
 
 export const DEFAULT_BOX: BoxStyle = {
@@ -35,6 +37,7 @@ export const DEFAULT_BOX: BoxStyle = {
   backgroundColor: 'transparent',
   opacity: 1,
   filter: 'none',
+  objectFit: 'cover'
 };
 
 export const INITIAL_SWATCHES: ColorSwatch[] = [

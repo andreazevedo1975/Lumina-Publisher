@@ -1,4 +1,3 @@
-
 import React, { useState, useReducer, useEffect, useRef } from 'react';
 import SidebarLeft from './components/SidebarLeft';
 import SidebarRight from './components/SidebarRight';
@@ -14,9 +13,11 @@ type Action =
   | { type: 'ADD_PAGE' }
   | { type: 'SELECT_ELEMENT'; payload: string | null }
   | { type: 'UPDATE_ELEMENT'; payload: { id: string, updates: Partial<PageElement> } }
+  | { type: 'REMOVE_ELEMENT'; payload: string }
   | { type: 'UPDATE_STYLE'; payload: { id: string, styleUpdates: any } }
   | { type: 'ADD_ASSET_ELEMENT'; payload: { url: string, x: number, y: number, style?: any } }
   | { type: 'ADD_ASSET_TO_LIBRARY'; payload: string }
+  | { type: 'REMOVE_ASSET_FROM_LIBRARY'; payload: string }
   | { type: 'ADD_SWATCH'; payload: ColorSwatch }
   | { type: 'REMOVE_SWATCH'; payload: string }
   | { type: 'UPDATE_SWATCH'; payload: ColorSwatch }
@@ -46,6 +47,16 @@ function projectReducer(state: Project, action: Action): Project {
             ? { ...p, elements: p.elements.map(el => el.id === action.payload.id ? { ...el, ...action.payload.updates } : el) }
             : p
         )
+      };
+    case 'REMOVE_ELEMENT':
+      return {
+          ...state,
+          activeElementId: null,
+          pages: state.pages.map(p => 
+              p.id === state.activePageId 
+              ? { ...p, elements: p.elements.filter(el => el.id !== action.payload) }
+              : p
+          )
       };
     case 'UPDATE_STYLE':
       return {
@@ -78,6 +89,11 @@ function projectReducer(state: Project, action: Action): Project {
         return {
             ...state,
             assets: [action.payload, ...state.assets]
+        };
+    case 'REMOVE_ASSET_FROM_LIBRARY':
+        return {
+            ...state,
+            assets: state.assets.filter(a => a !== action.payload)
         };
     case 'ADD_SWATCH':
         return {
@@ -538,6 +554,7 @@ const App: React.FC = () => {
             onAddPage={() => dispatch({ type: 'ADD_PAGE' })}
             onAssetDragStart={(e, url) => e.dataTransfer.setData('text/plain', url)}
             onAddAsset={(url) => dispatch({ type: 'ADD_ASSET_TO_LIBRARY', payload: url })}
+            onRemoveAsset={(url) => dispatch({ type: 'REMOVE_ASSET_FROM_LIBRARY', payload: url })}
         />
         
         <div 
@@ -557,6 +574,7 @@ const App: React.FC = () => {
                     if (!id) setEditingId(null);
                 }}
                 onElementUpdate={(id, updates) => dispatch({ type: 'UPDATE_ELEMENT', payload: { id, updates }})}
+                onRemoveElement={(id) => dispatch({ type: 'REMOVE_ELEMENT', payload: id })}
             />
         </div>
 

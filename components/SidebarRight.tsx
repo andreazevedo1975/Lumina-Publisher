@@ -639,6 +639,63 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                     <option value="manual">Manual</option>
                  </select>
              </div>
+
+             {/* Widows & Orphans Control */}
+             <div className="space-y-3 pt-2 border-t border-slate-700">
+                 <h4 className="text-[10px] font-bold text-slate-500 uppercase">Controle de Fluxo (Viúvas/Órfãs)</h4>
+                 <div className="grid grid-cols-2 gap-3">
+                     <div className="space-y-1">
+                        <div className="flex justify-between">
+                            <label className="text-[10px] text-slate-500">Widows (Topo)</label>
+                            <span className="text-[10px] text-slate-400">{activeElement.style.widows || 2}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                             <input 
+                                type="range" 
+                                min="1" 
+                                max="5" 
+                                step="1" 
+                                value={activeElement.style.widows || 2} 
+                                onChange={(e) => onUpdateStyle(activeElement.id, { widows: parseInt(e.target.value) })} 
+                                className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" 
+                            />
+                            <input 
+                                type="number" 
+                                min="1" 
+                                max="10" 
+                                value={activeElement.style.widows || 2} 
+                                onChange={(e) => onUpdateStyle(activeElement.id, { widows: parseInt(e.target.value) })} 
+                                className="w-8 bg-slate-800 border border-slate-700 rounded text-[10px] py-0.5 px-1 text-center" 
+                            />
+                        </div>
+                     </div>
+                     <div className="space-y-1">
+                        <div className="flex justify-between">
+                            <label className="text-[10px] text-slate-500">Orphans (Base)</label>
+                            <span className="text-[10px] text-slate-400">{activeElement.style.orphans || 2}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                             <input 
+                                type="range" 
+                                min="1" 
+                                max="5" 
+                                step="1" 
+                                value={activeElement.style.orphans || 2} 
+                                onChange={(e) => onUpdateStyle(activeElement.id, { orphans: parseInt(e.target.value) })} 
+                                className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" 
+                            />
+                            <input 
+                                type="number" 
+                                min="1" 
+                                max="10" 
+                                value={activeElement.style.orphans || 2} 
+                                onChange={(e) => onUpdateStyle(activeElement.id, { orphans: parseInt(e.target.value) })} 
+                                className="w-8 bg-slate-800 border border-slate-700 rounded text-[10px] py-0.5 px-1 text-center" 
+                            />
+                        </div>
+                     </div>
+                 </div>
+             </div>
           </div>
         </div>
       )}

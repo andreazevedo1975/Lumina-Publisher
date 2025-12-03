@@ -72,14 +72,62 @@ export const runPreflightCheck = async (documentSummary: string): Promise<string
     }
 }
 
-export const generateImage = async (prompt: string): Promise<string> => {
+const urlToBase64 = async (url: string): Promise<{ data: string, mimeType: string }> => {
+    // If already data URL
+    if (url.startsWith('data:')) {
+        const matches = url.match(/^data:(.+);base64,(.+)$/);
+        if (matches) {
+            return { mimeType: matches[1], data: matches[2] };
+        }
+    }
+    
+    // Fetch external URL
+    try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const base64data = reader.result as string;
+                const matches = base64data.match(/^data:(.+);base64,(.+)$/);
+                if (matches) {
+                    resolve({ mimeType: matches[1], data: matches[2] });
+                } else {
+                    reject(new Error("Falha na conversão base64"));
+                }
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    } catch (e) {
+        console.error("Failed to fetch image for AI editing:", e);
+        throw new Error("Não foi possível carregar a imagem de referência (CORS ou erro de rede).");
+    }
+};
+
+export const generateImage = async (prompt: string, referenceImageUrl?: string): Promise<string> => {
     try {
         const ai = getAI();
-        // Using gemini-2.5-flash-image for generation as per guidelines
+        const parts: any[] = [];
+        
+        // If we have a reference image, add it first (for editing/variation)
+        if (referenceImageUrl) {
+             const { data, mimeType } = await urlToBase64(referenceImageUrl);
+             parts.push({
+                 inlineData: {
+                     mimeType,
+                     data
+                 }
+             });
+        }
+        
+        parts.push({ text: prompt });
+
+        // Using gemini-2.5-flash-image for generation and editing
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash-image',
             contents: {
-                parts: [{ text: prompt }]
+                parts: parts
             },
             config: {
                 imageConfig: {
