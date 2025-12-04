@@ -72,6 +72,37 @@ export const suggestCopyEdit = async (content: string): Promise<string> => {
     }
 }
 
+export const generateBookSummary = async (bookContent: string): Promise<string> => {
+    try {
+        const ai = getAI();
+        // Truncate to avoid context limits if book is absolutely massive, though 1.5/2.5 handles huge context.
+        // We take the first 100k characters which usually covers intro, first chapters, etc.
+        const contentSample = bookContent.substring(0, 100000); 
+        
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: `Analise o conteúdo do livro fornecido abaixo.
+            
+            Gere um resumo conciso, ideal para a página de capa ou descrição (blurb).
+            Foque nos temas principais e no público-alvo.
+            
+            Estruture a resposta com:
+            - **Sinopse Sugerida** (1-2 parágrafos atraentes)
+            - **Temas Principais** (Lista de bullet points)
+            - **Público-Alvo Recomendado**
+            
+            Responda em Português do Brasil.
+            
+            Conteúdo do Livro (Amostra):
+            ${contentSample}`
+        });
+        return response.text || "Não foi possível gerar o resumo.";
+    } catch (error) {
+        console.error("Gemini Summary Error:", error);
+        return "Erro ao gerar resumo. Verifique a API Key.";
+    }
+}
+
 export const runPreflightCheck = async (documentSummary: string): Promise<string> => {
     try {
         const ai = getAI();
@@ -273,12 +304,57 @@ export const parseDocumentToMarkdown = async (file: File): Promise<{ text: strin
                 for (let i = 1; i <= numPages; i++) {
                     const page = await pdf.getPage(i);
                     const textContent = await page.getTextContent();
-                    // Join with newlines to preserve paragraph/line structure
-                    const pageText = textContent.items.map((item: any) => item.str).join('\n');
-                    textPages.push(pageText);
+                    
+                    // Advanced PDF Text Extraction
+                    // Sort items by Y (desc) then X (asc) to ensure reading order
+                    const items = textContent.items.map((item: any) => ({
+                        str: item.str,
+                        x: item.transform[4],
+                        y: item.transform[5],
+                        width: item.width,
+                        hasEOL: item.hasEOL
+                    }));
+
+                    items.sort((a: any, b: any) => {
+                        // Sort by line (Y) with a small tolerance (e.g. 5 units) for uneven scans
+                        if (Math.abs(b.y - a.y) > 5) {
+                            return b.y - a.y;
+                        }
+                        return a.x - b.x;
+                    });
+
+                    // Reconstruct text with smart spacing
+                    let pageStr = '';
+                    let lastY = -1;
+                    let lastX = -1;
+                    let lastWidth = 0;
+                    
+                    items.forEach((item: any) => {
+                        if (lastY !== -1) {
+                            const dy = Math.abs(item.y - lastY);
+                            if (dy > 10) {
+                                pageStr += '\n'; // New line
+                            } else {
+                                // Check for horizontal space
+                                const dx = item.x - (lastX + lastWidth);
+                                // If distance is somewhat significant, add a space. 
+                                // Threshold 2 is a heuristic for typical font sizes.
+                                if (dx > 2) {
+                                    pageStr += ' ';
+                                }
+                            }
+                        }
+                        
+                        pageStr += item.str;
+                        lastY = item.y;
+                        lastX = item.x;
+                        lastWidth = item.width;
+                    });
+
+                    textPages.push(pageStr);
                 }
                 
-                // Combine all pages with double newlines
+                // Combine all pages with double newlines to ensure paragraph breaks
                 const fullText = textPages.join('\n\n');
 
                 resolve({ text: fullText, images: [] });

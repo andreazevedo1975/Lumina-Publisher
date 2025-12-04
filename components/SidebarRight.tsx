@@ -1,9 +1,12 @@
+
+// ... existing imports ...
 import React, { useState, useEffect } from 'react';
 import { Project, PageElement, Unit, ColorSpace, ColorSwatch, MasterPage, ElementType } from '../types';
 import { Icons } from './Icon';
 import * as GeminiService from '../services/geminiService';
 import { DEFAULT_TYPOGRAPHY, DEFAULT_BOX } from '../constants';
 
+// ... existing interfaces and utils (hexToRgb, etc) ...
 interface SidebarRightProps {
   project: Project;
   activeElement: PageElement | undefined;
@@ -16,7 +19,6 @@ interface SidebarRightProps {
   onEditStart: (id: string) => void;
 }
 
-// --- COLOR UTILS ---
 const hexToRgb = (hex: string): [number, number, number] => {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
   return result ? [
@@ -70,18 +72,17 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
   const [aiLoading, setAiLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'transform' | 'text' | 'color' | 'ai'>('transform');
   
-  // Color Panel State
   const [colorMode, setColorMode] = useState<ColorSpace>(ColorSpace.RGB);
   const [targetProp, setTargetProp] = useState<'text' | 'fill' | 'border'>('text');
   const [selectedSwatchId, setSelectedSwatchId] = useState<string | null>(null);
   const [swatchName, setSwatchName] = useState<string>('');
 
-  // Master Page Config State
   const [headerText, setHeaderText] = useState(project.name);
   const [headerAlign, setHeaderAlign] = useState<'left'|'center'|'right'>('center');
   const [footerText, setFooterText] = useState('{{page}}');
   const [footerAlign, setFooterAlign] = useState<'left'|'center'|'right'>('center');
   
+  // ... (existing useEffects logic remains unchanged) ...
   useEffect(() => {
     if (activeElement) {
         if (activeElement.type === 'TEXT') {
@@ -92,24 +93,21 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
     }
   }, [activeElement?.id, activeElement?.type]);
 
-  // Sync Master Page settings when panel opens (or when element is deselected)
   useEffect(() => {
     if (!activeElement && project.activePageId) {
         const activePage = project.pages.find(p => p.id === project.activePageId);
         if (activePage) {
              const masterPage = project.masterPages.find(mp => mp.id === activePage.masterPageId);
              if (masterPage) {
-                 // Try to find existing system elements to sync state
                  const header = masterPage.elements.find(el => el.id.startsWith('sys-header'));
                  const footer = masterPage.elements.find(el => el.id.startsWith('sys-footer'));
                  
                  if (header) {
-                     // Extract plain text from HTML p tag if possible, or just raw content
                      const plainText = header.content.replace(/<[^>]*>/g, '').trim();
                      setHeaderText(plainText || headerText);
                      setHeaderAlign(header.style.textAlign || 'center');
                  } else {
-                     setHeaderText('{{title}}'); // Default smart placeholder
+                     setHeaderText('{{title}}'); 
                  }
 
                  if (footer) {
@@ -133,7 +131,7 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
     }
   }, [selectedSwatchId, project.swatches]);
 
-
+  // ... (existing action handlers: handleAiAltText, handleAiCopyPolish, handleClearFormat, handleIndent, toggleList, applyHeaderFooter, applyColor, handleRGBChange, etc...) ...
   const handleAiAltText = async () => {
     if (!activeElement || activeElement.type !== 'IMAGE') return;
     setAiLoading(true);
@@ -145,60 +143,69 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
   const handleAiCopyPolish = async () => {
     if (!activeElement || activeElement.type !== 'TEXT') return;
     setAiLoading(true);
-    // Send content directly, allowing AI to preserve HTML structure
     const newContent = await GeminiService.suggestCopyEdit(activeElement.content);
     onUpdateElement(activeElement.id, { content: newContent });
     setAiLoading(false);
   }
 
-  // --- MASTER PAGE HEADER/FOOTER LOGIC ---
+  const handleClearFormat = () => {
+    if (!activeElement) return;
+    onUpdateStyle(activeElement.id, {
+        fontWeight: 400,
+        fontStyle: 'normal',
+        textDecoration: 'none',
+        color: '#1e293b'
+    });
+  };
+
+  const handleIndent = (direction: 'in' | 'out') => {
+    if (!activeElement) return;
+    const current = activeElement.style.paddingLeft || 0;
+    const step = 20;
+    const next = direction === 'in' ? current + step : Math.max(0, current - step);
+    onUpdateStyle(activeElement.id, { paddingLeft: next });
+  };
+
+  const toggleList = (type: 'ul' | 'ol') => {
+      if (!activeElement) return;
+      let content = activeElement.content;
+      if (content.includes(`<${type}>`)) {
+          content = content.replace(new RegExp(`<${type}>`, 'g'), '').replace(new RegExp(`<\/${type}>`, 'g'), '');
+          content = content.replace(/<li>/g, '').replace(/<\/li>/g, '<br/>');
+      } else {
+          content = `<${type}><li>${content.replace(/<br\s*\/?>/g, '</li><li>')}</li></${type}>`;
+      }
+      onUpdateElement(activeElement.id, { content });
+  };
+
   const applyHeaderFooter = () => {
       if (!onUpdateMasterPage) return;
-
       const activePage = project.pages.find(p => p.id === project.activePageId) || project.pages[0];
       const masterPage = project.masterPages.find(mp => mp.id === activePage.masterPageId);
       if (!masterPage) return;
-
       const existingElements = masterPage.elements.filter(el => !el.id.startsWith('sys-header') && !el.id.startsWith('sys-footer'));
-
       const newElements: PageElement[] = [...existingElements];
-
       if (headerText.trim()) {
           newElements.push({
               id: `sys-header-${Date.now()}`,
               type: ElementType.TEXT,
               content: `<p style="color: #64748b;">${headerText}</p>`,
-              style: { 
-                  ...DEFAULT_TYPOGRAPHY, ...DEFAULT_BOX, 
-                  textAlign: headerAlign,
-                  fontSize: 10,
-                  color: '#64748b'
-              },
-              x: 50, y: 30, width: project.width - 100, height: 20, 
-              rotation: 0, locked: true
+              style: { ...DEFAULT_TYPOGRAPHY, ...DEFAULT_BOX, textAlign: headerAlign, fontSize: 10, color: '#64748b' },
+              x: 50, y: 30, width: project.width - 100, height: 20, rotation: 0, locked: true
           });
       }
-
       if (footerText.trim()) {
          newElements.push({
               id: `sys-footer-${Date.now()}`,
               type: ElementType.TEXT,
               content: `<p style="color: #64748b;">${footerText}</p>`,
-              style: { 
-                  ...DEFAULT_TYPOGRAPHY, ...DEFAULT_BOX, 
-                  textAlign: footerAlign,
-                  fontSize: 10,
-                  color: '#64748b'
-              },
-              x: 50, y: project.height - 40, width: project.width - 100, height: 20, 
-              rotation: 0, locked: true
+              style: { ...DEFAULT_TYPOGRAPHY, ...DEFAULT_BOX, textAlign: footerAlign, fontSize: 10, color: '#64748b' },
+              x: 50, y: project.height - 40, width: project.width - 100, height: 20, rotation: 0, locked: true
           });
       }
-
       onUpdateMasterPage(masterPage.id, { elements: newElements });
   };
 
-  // --- COLOR PANEL LOGIC ---
   const getCurrentColorHex = (): string => {
       if (!activeElement) return '#000000';
       if (targetProp === 'text') return activeElement.style.color;
@@ -212,14 +219,8 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
       if (targetProp === 'text') onUpdateStyle(activeElement.id, { color: hex });
       if (targetProp === 'fill') onUpdateStyle(activeElement.id, { backgroundColor: hex });
       if (targetProp === 'border') onUpdateStyle(activeElement.id, { borderColor: hex });
-      
       const match = project.swatches.find(s => s.value.toLowerCase() === hex.toLowerCase());
-      if (match) {
-          setSelectedSwatchId(match.id);
-          setColorMode(match.space);
-      } else {
-          setSelectedSwatchId(null);
-      }
+      if (match) { setSelectedSwatchId(match.id); setColorMode(match.space); } else { setSelectedSwatchId(null); }
   };
 
   const handleRGBChange = (component: 'r'|'g'|'b', val: number) => {
@@ -242,16 +243,8 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
       const hex = getCurrentColorHex();
       const [r, g, b] = hexToRgb(hex);
       const components = colorMode === ColorSpace.RGB ? [r, g, b] : rgbToCmyk(r,g,b);
-      
       const name = swatchName.trim() || `Amostra ${project.swatches.length + 1}`;
-
-      const newSwatch: ColorSwatch = {
-          id: `sw-${Date.now()}`,
-          name: name,
-          value: hex,
-          space: colorMode,
-          components: components
-      };
+      const newSwatch: ColorSwatch = { id: `sw-${Date.now()}`, name: name, value: hex, space: colorMode, components: components };
       onAddSwatch(newSwatch);
       setSelectedSwatchId(newSwatch.id);
   };
@@ -260,25 +253,16 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
       if (!selectedSwatchId) return;
       const swatch = project.swatches.find(s => s.id === selectedSwatchId);
       if (!swatch) return;
-
       const hex = getCurrentColorHex();
       const [r, g, b] = hexToRgb(hex);
       const components = colorMode === ColorSpace.RGB ? [r, g, b] : rgbToCmyk(r,g,b);
-
-      onUpdateSwatch({
-          ...swatch,
-          name: swatchName.trim() || swatch.name,
-          value: hex,
-          space: colorMode,
-          components: components
-      });
+      onUpdateSwatch({ ...swatch, name: swatchName.trim() || swatch.name, value: hex, space: colorMode, components: components });
   };
 
   const handleSwatchClick = (swatch: ColorSwatch) => {
       setSelectedSwatchId(swatch.id);
       setColorMode(swatch.space);
       setSwatchName(swatch.name);
-      
       if (activeElement) {
           if (targetProp === 'text') onUpdateStyle(activeElement.id, { color: swatch.value });
           if (targetProp === 'fill') onUpdateStyle(activeElement.id, { backgroundColor: swatch.value });
@@ -287,22 +271,22 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
   };
 
   if (!activeElement) {
+    // ... existing master page render ...
     const activePage = project.pages.find(p => p.id === project.activePageId);
     const masterPage = activePage ? project.masterPages.find(mp => mp.id === activePage.masterPageId) : null;
-
     return (
       <div className="w-80 bg-slate-900 border-l border-slate-700 flex flex-col h-full text-slate-300 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-600">
          <div className="p-4 border-b border-slate-700 bg-slate-800/50 backdrop-blur-sm sticky top-0 z-10 flex items-center gap-2">
             <Icons.Layout size={14} className="text-blue-400" />
             <span className="text-xs font-bold uppercase tracking-wider text-blue-400">Configuração da Página</span>
          </div>
-
          <div className="p-4 space-y-6">
+             {/* ... Master Page controls ... */}
              <div className="space-y-1 bg-slate-800 p-3 rounded border border-slate-700">
                 <span className="text-[10px] text-slate-500 uppercase font-bold">Página Mestra Ativa</span>
                 <div className="text-sm font-medium text-white">{masterPage?.name || 'Nenhuma'}</div>
              </div>
-
+             {/* ... Header / Footer Sections ... */}
              <div className="space-y-3">
                  <div className="flex items-center gap-2 text-slate-400 border-b border-slate-700 pb-1">
                      <Icons.PanelTop size={14} />
@@ -310,19 +294,8 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                  </div>
                  <div className="space-y-2">
                      <label className="text-[10px] text-slate-500">Texto</label>
-                     <input 
-                        type="text" 
-                        value={headerText}
-                        onChange={(e) => setHeaderText(e.target.value)}
-                        placeholder="Ex: Nome do Livro"
-                        className="w-full bg-slate-800 border border-slate-700 rounded text-xs py-1.5 px-2 text-slate-200 focus:border-blue-500 outline-none"
-                     />
-                     <button 
-                        onClick={() => setHeaderText('{{title}}')}
-                        className="text-[10px] text-blue-400 hover:underline flex items-center gap-1"
-                     >
-                         <Icons.Sparkles size={8} /> Inserir Nome do Livro
-                     </button>
+                     <input type="text" value={headerText} onChange={(e) => setHeaderText(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded text-xs py-1.5 px-2 text-slate-200 focus:border-blue-500 outline-none" placeholder="Ex: Nome do Livro" />
+                     <button onClick={() => setHeaderText('{{title}}')} className="text-[10px] text-blue-400 hover:underline flex items-center gap-1"><Icons.Sparkles size={8} /> Inserir Nome do Livro</button>
                      <div className="flex bg-slate-800 rounded p-1 border border-slate-700">
                         <button onClick={() => setHeaderAlign('left')} className={`flex-1 py-1 rounded flex justify-center ${headerAlign === 'left' ? 'bg-slate-600 text-white' : 'text-slate-500 hover:text-white'}`}><Icons.AlignLeft size={12}/></button>
                         <button onClick={() => setHeaderAlign('center')} className={`flex-1 py-1 rounded flex justify-center ${headerAlign === 'center' ? 'bg-slate-600 text-white' : 'text-slate-500 hover:text-white'}`}><Icons.AlignCenter size={12}/></button>
@@ -330,7 +303,6 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                      </div>
                  </div>
              </div>
-
              <div className="space-y-3">
                  <div className="flex items-center gap-2 text-slate-400 border-b border-slate-700 pb-1">
                      <Icons.PanelBottom size={14} />
@@ -339,13 +311,7 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                  <div className="space-y-2">
                      <label className="text-[10px] text-slate-500">Texto</label>
                      <div className="relative">
-                        <input 
-                            type="text" 
-                            value={footerText}
-                            onChange={(e) => setFooterText(e.target.value)}
-                            placeholder="Ex: {{page}}"
-                            className="w-full bg-slate-800 border border-slate-700 rounded text-xs py-1.5 px-2 text-slate-200 focus:border-blue-500 outline-none"
-                        />
+                        <input type="text" value={footerText} onChange={(e) => setFooterText(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded text-xs py-1.5 px-2 text-slate-200 focus:border-blue-500 outline-none" placeholder="Ex: {{page}}" />
                         <div className="absolute right-2 top-1.5 text-[10px] text-slate-500 pointer-events-none">{'{{page}}'} = Nº Pág</div>
                      </div>
                      <div className="flex bg-slate-800 rounded p-1 border border-slate-700">
@@ -355,13 +321,7 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                      </div>
                  </div>
              </div>
-
-             <button 
-                onClick={applyHeaderFooter}
-                className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded shadow flex items-center justify-center gap-2 transition-colors mt-4"
-             >
-                <Icons.CheckCircle size={14} /> Aplicar na Mestra
-             </button>
+             <button onClick={applyHeaderFooter} className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded shadow flex items-center justify-center gap-2 transition-colors mt-4"><Icons.CheckCircle size={14} /> Aplicar na Mestra</button>
          </div>
       </div>
     );
@@ -374,6 +334,7 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
   return (
     <div className="w-80 bg-slate-900 border-l border-slate-700 flex flex-col h-full text-slate-300 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-600">
       
+      {/* ... Headers ... */}
       <div className="p-4 border-b border-slate-700 bg-slate-800/50 backdrop-blur-sm sticky top-0 z-10 flex justify-between items-center">
         <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-blue-400">
            {activeElement.type === 'TEXT' && <><Icons.Type size={14} /> Caixa de Texto</>}
@@ -392,6 +353,7 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
       </div>
 
       {activeTab === 'transform' && (
+          // ... (Transform tab content remains unchanged) ...
       <div className="p-4 space-y-6">
         <div className="space-y-4">
             <h3 className="text-xs font-bold text-slate-500">GEOMETRIA</h3>
@@ -427,12 +389,68 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
             </div>
         </div>
 
+        <div className="border-t border-slate-700"></div>
+
+        <div className="space-y-3">
+             <h3 className="text-xs font-bold text-slate-500 flex items-center gap-2">BORDA</h3>
+             {/* ... Border controls ... */}
+             <div className="flex items-center gap-3">
+                 <div className="space-y-1 flex-1">
+                    <label className="text-[10px] text-slate-500">Largura (px)</label>
+                    <div className="flex items-center gap-2">
+                        <input 
+                            type="range" min="0" max="20" 
+                            value={activeElement.style.borderWidth || 0} 
+                            onChange={(e) => onUpdateStyle(activeElement.id, { borderWidth: parseInt(e.target.value) })}
+                            className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                        />
+                        <input 
+                            type="number" 
+                            value={activeElement.style.borderWidth || 0} 
+                            onChange={(e) => onUpdateStyle(activeElement.id, { borderWidth: parseInt(e.target.value) || 0 })} 
+                            className="w-10 bg-slate-800 border border-slate-700 rounded text-xs py-0.5 px-1 text-right focus:ring-0" 
+                        />
+                    </div>
+                 </div>
+                 <div className="space-y-1">
+                    <label className="text-[10px] text-slate-500">Cor</label>
+                    <div className="flex items-center gap-2">
+                        <input 
+                            type="color" 
+                            value={activeElement.style.borderColor || '#000000'}
+                            onChange={(e) => onUpdateStyle(activeElement.id, { borderColor: e.target.value })}
+                            className="w-8 h-8 rounded border border-slate-700 bg-transparent cursor-pointer p-0.5"
+                        />
+                    </div>
+                 </div>
+             </div>
+             
+             <div className="space-y-1">
+                 <label className="text-[10px] text-slate-500">Arredondamento (px)</label>
+                 <div className="flex items-center gap-2">
+                     <input 
+                        type="range" min="0" max="100" step="1" 
+                        value={activeElement.style.borderRadius || 0} 
+                        onChange={(e) => onUpdateStyle(activeElement.id, { borderRadius: parseInt(e.target.value) })}
+                        className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                     />
+                     <input 
+                        type="number" 
+                        min="0" max="100"
+                        value={activeElement.style.borderRadius || 0} 
+                        onChange={(e) => onUpdateStyle(activeElement.id, { borderRadius: parseInt(e.target.value) || 0 })}
+                        className="w-10 bg-slate-800 border border-slate-700 rounded text-xs py-0.5 px-1 text-right focus:ring-0"
+                     />
+                 </div>
+             </div>
+        </div>
+
         {activeElement.type === 'IMAGE' && (
             <>
             <div className="border-t border-slate-700"></div>
             <div className="space-y-3">
                 <h3 className="text-xs font-bold text-slate-500">EFEITOS DE IMAGEM</h3>
-                
+                {/* ... Image effects ... */}
                 <div className="space-y-1">
                      <label className="text-[10px] text-slate-500">Brilho ({Math.round((activeElement.style.brightness || 1) * 100)}%)</label>
                      <input 
@@ -442,7 +460,6 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                         className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
                      />
                 </div>
-                
                 <div className="space-y-1">
                      <label className="text-[10px] text-slate-500">Contraste ({Math.round((activeElement.style.contrast || 1) * 100)}%)</label>
                      <input 
@@ -452,33 +469,22 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                         className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
                      />
                 </div>
-
-                <div className="space-y-1">
-                     <label className="text-[10px] text-slate-500">Arredondamento ({activeElement.style.borderRadius || 0}px)</label>
-                     <input 
-                        type="range" min="0" max="100" step="1" 
-                        value={activeElement.style.borderRadius || 0} 
-                        onChange={(e) => onUpdateStyle(activeElement.id, { borderRadius: parseInt(e.target.value) })}
-                        className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                     />
-                </div>
-
                 <div className="grid grid-cols-2 gap-2 pt-2">
                     <button 
-                        onClick={() => onUpdateStyle(activeElement.id, { filter: activeElement.style.filter?.includes('grayscale') ? 'none' : 'grayscale(100%)' })}
-                        className={`text-[10px] py-1.5 rounded border border-slate-700 ${activeElement.style.filter?.includes('grayscale') ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}
+                        onClick={() => onUpdateStyle(activeElement.id, { grayscale: activeElement.style.grayscale ? 0 : 1 })}
+                        className={`text-[10px] py-1.5 rounded border border-slate-700 ${activeElement.style.grayscale ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}
                     >
                         P&B
                     </button>
                     <button 
-                         onClick={() => onUpdateStyle(activeElement.id, { filter: activeElement.style.filter?.includes('sepia') ? 'none' : 'sepia(100%)' })}
-                        className={`text-[10px] py-1.5 rounded border border-slate-700 ${activeElement.style.filter?.includes('sepia') ? 'bg-amber-700 text-white' : 'bg-slate-800 text-slate-400'}`}
+                         onClick={() => onUpdateStyle(activeElement.id, { sepia: activeElement.style.sepia ? 0 : 1 })}
+                        className={`text-[10px] py-1.5 rounded border border-slate-700 ${activeElement.style.sepia ? 'bg-amber-700 text-white' : 'bg-slate-800 text-slate-400'}`}
                     >
                         Sépia
                     </button>
                     <button 
-                         onClick={() => onUpdateStyle(activeElement.id, { filter: activeElement.style.filter?.includes('blur') ? 'none' : 'blur(4px)' })}
-                        className={`text-[10px] py-1.5 rounded border border-slate-700 ${activeElement.style.filter?.includes('blur') ? 'bg-slate-600 text-white' : 'bg-slate-800 text-slate-400'}`}
+                         onClick={() => onUpdateStyle(activeElement.id, { blur: activeElement.style.blur ? 0 : 4 })}
+                        className={`text-[10px] py-1.5 rounded border border-slate-700 ${activeElement.style.blur ? 'bg-slate-600 text-white' : 'bg-slate-800 text-slate-400'}`}
                     >
                         Blur
                     </button>
@@ -492,6 +498,7 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
         <div className="space-y-3">
              <h3 className="text-xs font-bold text-slate-500 flex items-center gap-2">MARGEM (Externa)</h3>
              <div className="grid grid-cols-2 gap-2">
+                 {/* ... Margins ... */}
                  <div className="flex items-center bg-slate-800 rounded border border-slate-700 px-2">
                      <span className="text-[10px] text-slate-500 w-4 font-bold" title="Topo">T</span>
                      <input type="number" value={activeElement.style.marginTop} onChange={(e) => onUpdateStyle(activeElement.id, { marginTop: parseInt(e.target.value) || 0 })} className="w-full bg-transparent border-none text-xs py-1 text-right focus:ring-0" />
@@ -513,28 +520,33 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
 
         <div className="space-y-3">
              <h3 className="text-xs font-bold text-slate-500 flex items-center gap-2">PADDING (Interno)</h3>
-             <div className="grid grid-cols-2 gap-2">
-                 <div className="flex items-center bg-slate-800 rounded border border-slate-700 px-2">
-                     <span className="text-[10px] text-slate-500 w-4 font-bold" title="Topo">T</span>
-                     <input type="number" value={activeElement.style.paddingTop} onChange={(e) => onUpdateStyle(activeElement.id, { paddingTop: parseInt(e.target.value) || 0 })} className="w-full bg-transparent border-none text-xs py-1 text-right focus:ring-0" />
+             <div className="space-y-2">
+                 <div className="flex items-center gap-2">
+                     <span className="text-[10px] text-slate-500 w-3 font-bold" title="Topo">T</span>
+                     <input type="range" min="0" max="100" value={activeElement.style.paddingTop || 0} onChange={(e) => onUpdateStyle(activeElement.id, { paddingTop: parseInt(e.target.value) || 0 })} className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+                     <input type="number" value={activeElement.style.paddingTop || 0} onChange={(e) => onUpdateStyle(activeElement.id, { paddingTop: parseInt(e.target.value) || 0 })} className="w-10 bg-slate-800 border border-slate-700 rounded text-xs py-0.5 px-1 text-right focus:ring-0" />
                  </div>
-                 <div className="flex items-center bg-slate-800 rounded border border-slate-700 px-2">
-                     <span className="text-[10px] text-slate-500 w-4 font-bold" title="Direita">D</span>
-                     <input type="number" value={activeElement.style.paddingRight} onChange={(e) => onUpdateStyle(activeElement.id, { paddingRight: parseInt(e.target.value) || 0 })} className="w-full bg-transparent border-none text-xs py-1 text-right focus:ring-0" />
+                 <div className="flex items-center gap-2">
+                     <span className="text-[10px] text-slate-500 w-3 font-bold" title="Direita">D</span>
+                     <input type="range" min="0" max="100" value={activeElement.style.paddingRight || 0} onChange={(e) => onUpdateStyle(activeElement.id, { paddingRight: parseInt(e.target.value) || 0 })} className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+                     <input type="number" value={activeElement.style.paddingRight || 0} onChange={(e) => onUpdateStyle(activeElement.id, { paddingRight: parseInt(e.target.value) || 0 })} className="w-10 bg-slate-800 border border-slate-700 rounded text-xs py-0.5 px-1 text-right focus:ring-0" />
                  </div>
-                 <div className="flex items-center bg-slate-800 rounded border border-slate-700 px-2">
-                     <span className="text-[10px] text-slate-500 w-4 font-bold" title="Inferior">I</span>
-                     <input type="number" value={activeElement.style.paddingBottom} onChange={(e) => onUpdateStyle(activeElement.id, { paddingBottom: parseInt(e.target.value) || 0 })} className="w-full bg-transparent border-none text-xs py-1 text-right focus:ring-0" />
+                 <div className="flex items-center gap-2">
+                     <span className="text-[10px] text-slate-500 w-3 font-bold" title="Inferior">I</span>
+                     <input type="range" min="0" max="100" value={activeElement.style.paddingBottom || 0} onChange={(e) => onUpdateStyle(activeElement.id, { paddingBottom: parseInt(e.target.value) || 0 })} className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+                     <input type="number" value={activeElement.style.paddingBottom || 0} onChange={(e) => onUpdateStyle(activeElement.id, { paddingBottom: parseInt(e.target.value) || 0 })} className="w-10 bg-slate-800 border border-slate-700 rounded text-xs py-0.5 px-1 text-right focus:ring-0" />
                  </div>
-                 <div className="flex items-center bg-slate-800 rounded border border-slate-700 px-2">
-                     <span className="text-[10px] text-slate-500 w-4 font-bold" title="Esquerda">E</span>
-                     <input type="number" value={activeElement.style.paddingLeft} onChange={(e) => onUpdateStyle(activeElement.id, { paddingLeft: parseInt(e.target.value) || 0 })} className="w-full bg-transparent border-none text-xs py-1 text-right focus:ring-0" />
+                 <div className="flex items-center gap-2">
+                     <span className="text-[10px] text-slate-500 w-3 font-bold" title="Esquerda">E</span>
+                     <input type="range" min="0" max="100" value={activeElement.style.paddingLeft || 0} onChange={(e) => onUpdateStyle(activeElement.id, { paddingLeft: parseInt(e.target.value) || 0 })} className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+                     <input type="number" value={activeElement.style.paddingLeft || 0} onChange={(e) => onUpdateStyle(activeElement.id, { paddingLeft: parseInt(e.target.value) || 0 })} className="w-10 bg-slate-800 border border-slate-700 rounded text-xs py-0.5 px-1 text-right focus:ring-0" />
                  </div>
              </div>
         </div>
       </div>
       )}
 
+      {/* ... (Rest of file: Text, Color, AI Tabs) ... */}
       {activeTab === 'text' && activeElement.type === 'TEXT' && (
         <div className="p-4 space-y-4">
           
@@ -544,19 +556,26 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                  <button onClick={() => onUpdateStyle(activeElement.id, { fontWeight: activeElement.style.fontWeight === 700 ? 400 : 700 })} className={`p-1 rounded ${activeElement.style.fontWeight === 700 ? 'bg-blue-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`} title="Negrito"><Icons.Bold size={14}/></button>
                  <button onClick={() => onUpdateStyle(activeElement.id, { fontStyle: activeElement.style.fontStyle === 'italic' ? 'normal' : 'italic' })} className={`p-1 rounded ${activeElement.style.fontStyle === 'italic' ? 'bg-blue-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`} title="Itálico"><Icons.Italic size={14}/></button>
                  <button onClick={() => onUpdateStyle(activeElement.id, { textDecoration: activeElement.style.textDecoration === 'underline' ? 'none' : 'underline' })} className={`p-1 rounded ${activeElement.style.textDecoration === 'underline' ? 'bg-blue-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`} title="Sublinhado"><Icons.Underline size={14}/></button>
-                 <button onClick={() => onUpdateStyle(activeElement.id, { textDecoration: activeElement.style.textDecoration === 'line-through' ? 'none' : 'line-through' })} className={`p-1 rounded ${activeElement.style.textDecoration === 'line-through' ? 'bg-blue-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`} title="Tachado"><Icons.Eraser size={14}/></button>
+                 <button onClick={() => onUpdateStyle(activeElement.id, { textDecoration: activeElement.style.textDecoration === 'line-through' ? 'none' : 'line-through' })} className={`p-1 rounded ${activeElement.style.textDecoration === 'line-through' ? 'bg-blue-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`} title="Tachado"><Icons.Strikethrough size={14}/></button>
+                 <button onClick={handleClearFormat} className="p-1 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400" title="Limpar Formatação"><Icons.Eraser size={14}/></button>
              </div>
-             <div className="w-[1px] h-4 bg-slate-600"></div>
-             <button onClick={() => onUpdateStyle(activeElement.id, { textTransform: activeElement.style.textTransform === 'uppercase' ? 'none' : 'uppercase' })} className={`p-1 rounded ${activeElement.style.textTransform === 'uppercase' ? 'bg-blue-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`} title="Maiúsculas"><Icons.Type size={14}/></button>
           </div>
 
           <div className="space-y-2">
               <h3 className="text-[10px] font-bold text-slate-500 uppercase">Parágrafo</h3>
+              <div className="flex bg-slate-800 rounded p-1 border border-slate-700 mb-2">
+                 <button onClick={() => onUpdateStyle(activeElement.id, { textAlign: 'left' })} className={`flex-1 py-1 rounded flex justify-center ${activeElement.style.textAlign === 'left' ? 'bg-slate-600 text-white' : 'text-slate-500 hover:text-white'}`} title="Esquerda"><Icons.AlignLeft size={14}/></button>
+                 <button onClick={() => onUpdateStyle(activeElement.id, { textAlign: 'center' })} className={`flex-1 py-1 rounded flex justify-center ${activeElement.style.textAlign === 'center' ? 'bg-slate-600 text-white' : 'text-slate-500 hover:text-white'}`} title="Centro"><Icons.AlignCenter size={14}/></button>
+                 <button onClick={() => onUpdateStyle(activeElement.id, { textAlign: 'right' })} className={`flex-1 py-1 rounded flex justify-center ${activeElement.style.textAlign === 'right' ? 'bg-slate-600 text-white' : 'text-slate-500 hover:text-white'}`} title="Direita"><Icons.AlignRight size={14}/></button>
+                 <button onClick={() => onUpdateStyle(activeElement.id, { textAlign: 'justify' })} className={`flex-1 py-1 rounded flex justify-center ${activeElement.style.textAlign === 'justify' ? 'bg-slate-600 text-white' : 'text-slate-500 hover:text-white'}`} title="Justificado"><Icons.AlignJustify size={14}/></button>
+              </div>
+
               <div className="flex bg-slate-800 rounded p-1 border border-slate-700">
-                 <button onClick={() => onUpdateStyle(activeElement.id, { textAlign: 'left' })} className={`flex-1 py-1 rounded flex justify-center ${activeElement.style.textAlign === 'left' ? 'bg-slate-600 text-white' : 'text-slate-500 hover:text-white'}`}><Icons.AlignLeft size={14}/></button>
-                 <button onClick={() => onUpdateStyle(activeElement.id, { textAlign: 'center' })} className={`flex-1 py-1 rounded flex justify-center ${activeElement.style.textAlign === 'center' ? 'bg-slate-600 text-white' : 'text-slate-500 hover:text-white'}`}><Icons.AlignCenter size={14}/></button>
-                 <button onClick={() => onUpdateStyle(activeElement.id, { textAlign: 'right' })} className={`flex-1 py-1 rounded flex justify-center ${activeElement.style.textAlign === 'right' ? 'bg-slate-600 text-white' : 'text-slate-500 hover:text-white'}`}><Icons.AlignRight size={14}/></button>
-                 <button onClick={() => onUpdateStyle(activeElement.id, { textAlign: 'justify' })} className={`flex-1 py-1 rounded flex justify-center ${activeElement.style.textAlign === 'justify' ? 'bg-slate-600 text-white' : 'text-slate-500 hover:text-white'}`}><Icons.AlignJustify size={14}/></button>
+                 <button onClick={() => toggleList('ul')} className="flex-1 py-1 rounded flex justify-center text-slate-500 hover:text-white hover:bg-slate-700" title="Lista com Marcadores"><Icons.List size={14}/></button>
+                 <button onClick={() => toggleList('ol')} className="flex-1 py-1 rounded flex justify-center text-slate-500 hover:text-white hover:bg-slate-700" title="Lista Numerada"><Icons.ListOrdered size={14}/></button>
+                 <div className="w-[1px] h-4 bg-slate-600 mx-1 self-center"></div>
+                 <button onClick={() => handleIndent('out')} className="flex-1 py-1 rounded flex justify-center text-slate-500 hover:text-white hover:bg-slate-700" title="Diminuir Recuo"><Icons.Outdent size={14}/></button>
+                 <button onClick={() => handleIndent('in')} className="flex-1 py-1 rounded flex justify-center text-slate-500 hover:text-white hover:bg-slate-700" title="Aumentar Recuo"><Icons.Indent size={14}/></button>
               </div>
           </div>
           
@@ -588,6 +607,7 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                     <option value="Raleway">Raleway</option>
                     <option value="Nunito">Nunito</option>
                     <option value="Poppins">Poppins</option>
+                    <option value="Merriweather Sans">Merriweather Sans</option>
                 </optgroup>
                 <optgroup label="Display (Decorativo)">
                     <option value="Dancing Script">Dancing Script</option>
@@ -610,50 +630,42 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
              <div className="space-y-4 pt-2">
                  <div className="space-y-1">
                     <div className="flex justify-between">
-                        <label className="text-[10px] text-slate-500" title="Ajuste o espaçamento entre caracteres (Tracking/Kerning Manual)">Kerning / Tracking</label>
+                        <label className="text-[10px] text-slate-500" title="Ajuste o espaçamento entre caracteres (Tracking/Kerning Manual)">Tracking / Kerning</label>
                         <span className="text-[10px] text-slate-400">{activeElement.style.letterSpacing}em</span>
                     </div>
                     <div className="flex items-center gap-2">
                         <input 
-                            type="range" 
-                            min="-0.2" 
-                            max="1" 
-                            step="0.005" 
+                            type="range" min="-0.5" max="1.5" step="0.001" 
                             value={activeElement.style.letterSpacing} 
                             onChange={(e) => onUpdateStyle(activeElement.id, { letterSpacing: parseFloat(e.target.value) })} 
                             className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" 
                         />
                         <input 
-                            type="number" 
-                            step="0.01" 
+                            type="number" step="0.001" 
                             value={activeElement.style.letterSpacing} 
                             onChange={(e) => onUpdateStyle(activeElement.id, { letterSpacing: parseFloat(e.target.value) })} 
-                            className="w-12 bg-slate-800 border border-slate-700 rounded text-[10px] py-0.5 px-1 text-center" 
+                            className="w-14 bg-slate-800 border border-slate-700 rounded text-[10px] py-0.5 px-1 text-center font-mono" 
                         />
                     </div>
                  </div>
 
                  <div className="space-y-1">
                     <div className="flex justify-between">
-                        <label className="text-[10px] text-slate-500" title="Ajuste o espaçamento entre palavras">Entre Palavras</label>
+                        <label className="text-[10px] text-slate-500" title="Ajuste o espaçamento entre palavras">Word Spacing (Palavras)</label>
                         <span className="text-[10px] text-slate-400">{activeElement.style.wordSpacing || 0}em</span>
                     </div>
                     <div className="flex items-center gap-2">
                         <input 
-                            type="range" 
-                            min="-0.5" 
-                            max="2" 
-                            step="0.05" 
+                            type="range" min="-0.5" max="3" step="0.001" 
                             value={activeElement.style.wordSpacing || 0} 
                             onChange={(e) => onUpdateStyle(activeElement.id, { wordSpacing: parseFloat(e.target.value) })} 
                             className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" 
                         />
                         <input 
-                            type="number" 
-                            step="0.1" 
+                            type="number" step="0.001" 
                             value={activeElement.style.wordSpacing || 0} 
                             onChange={(e) => onUpdateStyle(activeElement.id, { wordSpacing: parseFloat(e.target.value) })} 
-                            className="w-12 bg-slate-800 border border-slate-700 rounded text-[10px] py-0.5 px-1 text-center" 
+                            className="w-14 bg-slate-800 border border-slate-700 rounded text-[10px] py-0.5 px-1 text-center font-mono" 
                         />
                     </div>
                  </div>
@@ -668,13 +680,46 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                  </div>
              </div>
 
-             <div className="space-y-1">
-                 <label className="text-[10px] text-slate-500">Hifenização</label>
+             <div className="space-y-2">
+                 <label className="text-[10px] text-slate-500">Hifenização (H&J)</label>
                  <select value={activeElement.style.hyphens} onChange={(e) => onUpdateStyle(activeElement.id, { hyphens: e.target.value })} className="w-full bg-slate-800 border border-slate-700 rounded text-xs py-1 px-2">
                     <option value="auto">Auto</option>
                     <option value="none">Nenhum</option>
                     <option value="manual">Manual</option>
                  </select>
+
+                 {/* Advanced Hyphenation Controls */}
+                 {activeElement.style.hyphens !== 'none' && (
+                     <div className="grid grid-cols-2 gap-2 bg-slate-800/50 p-2 rounded border border-slate-700/50 mt-1">
+                         <div className="space-y-1">
+                             <label className="text-[9px] text-slate-500 block" title="Mínimo de caracteres antes do hífen">Min. Antes</label>
+                             <input 
+                                type="number" min="1" max="10" 
+                                value={activeElement.style.hyphenateLimitCharsBefore || 3} 
+                                onChange={(e) => onUpdateStyle(activeElement.id, { hyphenateLimitCharsBefore: parseInt(e.target.value) || 2 })} 
+                                className="w-full bg-slate-700 border border-slate-600 rounded text-[10px] py-0.5 px-1 text-center" 
+                             />
+                         </div>
+                         <div className="space-y-1">
+                             <label className="text-[9px] text-slate-500 block" title="Mínimo de caracteres depois do hífen">Min. Depois</label>
+                             <input 
+                                type="number" min="1" max="10" 
+                                value={activeElement.style.hyphenateLimitCharsAfter || 3} 
+                                onChange={(e) => onUpdateStyle(activeElement.id, { hyphenateLimitCharsAfter: parseInt(e.target.value) || 2 })} 
+                                className="w-full bg-slate-700 border border-slate-600 rounded text-[10px] py-0.5 px-1 text-center" 
+                             />
+                         </div>
+                         <div className="col-span-2 space-y-1">
+                             <label className="text-[9px] text-slate-500 block" title="Zona de Hifenização (pixels)">Zona de Hifenização (px)</label>
+                             <input 
+                                type="range" min="0" max="100" 
+                                value={activeElement.style.hyphenateLimitZone || 0} 
+                                onChange={(e) => onUpdateStyle(activeElement.id, { hyphenateLimitZone: parseInt(e.target.value) || 0 })} 
+                                className="w-full h-1 bg-slate-600 rounded appearance-none cursor-pointer accent-blue-500" 
+                             />
+                         </div>
+                     </div>
+                 )}
              </div>
 
              {/* Widows & Orphans Control */}
@@ -690,7 +735,7 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                              <input 
                                 type="range" 
                                 min="1" 
-                                max="5" 
+                                max="10" 
                                 step="1" 
                                 value={activeElement.style.widows || 2} 
                                 onChange={(e) => onUpdateStyle(activeElement.id, { widows: parseInt(e.target.value) })} 
@@ -703,9 +748,9 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                                 value={activeElement.style.widows || 2} 
                                 onChange={(e) => {
                                     const val = parseInt(e.target.value);
-                                    if (!isNaN(val)) onUpdateStyle(activeElement.id, { widows: Math.max(1, val) });
+                                    if (!isNaN(val)) onUpdateStyle(activeElement.id, { widows: Math.max(1, Math.min(10, val)) });
                                 }} 
-                                className="w-8 bg-slate-800 border border-slate-700 rounded text-[10px] py-0.5 px-1 text-center" 
+                                className="w-10 bg-slate-800 border border-slate-700 rounded text-[10px] py-0.5 px-1 text-center" 
                             />
                         </div>
                      </div>
@@ -718,7 +763,7 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                              <input 
                                 type="range" 
                                 min="1" 
-                                max="5" 
+                                max="10" 
                                 step="1" 
                                 value={activeElement.style.orphans || 2} 
                                 onChange={(e) => onUpdateStyle(activeElement.id, { orphans: parseInt(e.target.value) })} 
@@ -731,9 +776,9 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                                 value={activeElement.style.orphans || 2} 
                                 onChange={(e) => {
                                     const val = parseInt(e.target.value);
-                                    if (!isNaN(val)) onUpdateStyle(activeElement.id, { orphans: Math.max(1, val) });
+                                    if (!isNaN(val)) onUpdateStyle(activeElement.id, { orphans: Math.max(1, Math.min(10, val)) });
                                 }} 
-                                className="w-8 bg-slate-800 border border-slate-700 rounded text-[10px] py-0.5 px-1 text-center" 
+                                className="w-10 bg-slate-800 border border-slate-700 rounded text-[10px] py-0.5 px-1 text-center" 
                             />
                         </div>
                      </div>
@@ -753,6 +798,7 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
         </div>
       )}
 
+      {/* ... (Existing color and AI tabs logic remains unchanged) ... */}
       {activeTab === 'color' && (
           <div className="p-4 space-y-5">
               
@@ -912,7 +958,7 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                         onClick={saveSwatch}
                         className="flex-1 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs rounded border border-slate-500 flex items-center justify-center gap-1"
                      >
-                        <Icons.Save size={12} /> Salvar Cor
+                        <Icons.Save size={12} /> Criar Nova
                      </button>
                      {selectedSwatchId && (
                          <button 

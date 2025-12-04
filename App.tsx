@@ -1,4 +1,3 @@
-
 import React, { useState, useReducer, useEffect, useRef } from 'react';
 import SidebarLeft from './components/SidebarLeft';
 import SidebarRight from './components/SidebarRight';
@@ -7,6 +6,7 @@ import { Project, PageElement, ViewMode, Unit, ElementType, ColorSwatch, Page, M
 import { INITIAL_PROJECT, DEFAULT_TYPOGRAPHY, DEFAULT_BOX, INITIAL_SWATCHES } from './constants';
 import { Icons } from './components/Icon';
 import * as GeminiService from './services/geminiService';
+import * as EpubService from './services/epubService';
 
 // Simple Reducer for complex state
 type Action = 
@@ -155,6 +155,50 @@ const PreflightModal = ({ result, onClose }: { result: string | null, onClose: (
     );
 }
 
+const SummaryModal = ({ summary, onClose }: { summary: string | null, onClose: () => void }) => {
+    if (!summary) return null;
+    
+    const copyToClipboard = () => {
+        navigator.clipboard.writeText(summary);
+        alert("Resumo copiado!");
+    };
+
+    return (
+        <div className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-lg shadow-2xl w-full max-w-3xl max-h-[80vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+                <div className="bg-gradient-to-r from-purple-900 to-indigo-900 px-6 py-4 flex justify-between items-center">
+                    <h3 className="text-white font-bold flex items-center gap-2">
+                        <Icons.BookText className="text-purple-300" /> Resumo do Livro (Gerado por IA)
+                    </h3>
+                    <button onClick={onClose} className="text-purple-200 hover:text-white">
+                        <Icons.Move size={20} className="rotate-45" /> 
+                    </button>
+                </div>
+                <div className="p-8 overflow-y-auto font-serif text-slate-800 leading-relaxed whitespace-pre-wrap text-lg bg-orange-50/30">
+                    {summary}
+                </div>
+                <div className="bg-slate-50 p-4 border-t flex justify-between items-center">
+                    <span className="text-xs text-slate-500">Ideal para descrição de loja ou capa.</span>
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={copyToClipboard}
+                            className="bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 px-4 py-2 rounded font-medium shadow-sm transition-colors flex items-center gap-2"
+                        >
+                            <Icons.Share2 size={14} /> Copiar Texto
+                        </button>
+                        <button 
+                            onClick={onClose}
+                            className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded font-bold shadow transition-colors"
+                        >
+                            Fechar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 const App: React.FC = () => {
   const [project, dispatch] = useReducer(projectReducer, INITIAL_PROJECT);
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.EDIT);
@@ -163,6 +207,11 @@ const App: React.FC = () => {
   const [preflightResult, setPreflightResult] = useState<string | null>(null);
   const [showPreflightModal, setShowPreflightModal] = useState(false);
   const [isPreflightLoading, setIsPreflightLoading] = useState(false);
+
+  // Summary State
+  const [summaryResult, setSummaryResult] = useState<string | null>(null);
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
 
   // Share State
   const [shareState, setShareState] = useState<'idle' | 'copied'>('idle');
@@ -215,8 +264,53 @@ const App: React.FC = () => {
       setIsPreflightLoading(false);
   };
 
+  const handleGenerateSummary = async () => {
+      setIsSummaryLoading(true);
+      
+      let combinedText = "";
+      const sortedPages = [...project.pages].sort((a,b) => {
+          const numA = parseInt(a.id.replace('page-', '')) || 0;
+          const numB = parseInt(b.id.replace('page-', '')) || 0;
+          return numA - numB;
+      });
+
+      sortedPages.forEach(p => {
+          const sortedEls = [...p.elements].sort((a,b) => (a.y - b.y) || (a.x - b.x));
+          sortedEls.forEach(el => {
+              if (el.type === ElementType.TEXT) {
+                  const txt = el.content.replace(/<[^>]+>/g, ' ');
+                  combinedText += txt + "\n";
+              }
+          });
+      });
+
+      if (!combinedText.trim()) {
+          alert("O projeto parece vazio. Adicione texto antes de gerar um resumo.");
+          setIsSummaryLoading(false);
+          return;
+      }
+
+      const summary = await GeminiService.generateBookSummary(combinedText);
+      setSummaryResult(summary);
+      setShowSummaryModal(true);
+      setIsSummaryLoading(false);
+  };
+
+  const handleExportEpub = async () => {
+      setLoadingMessage("Gerando EPUB 3...");
+      setIsProcessing(true);
+      await new Promise(r => setTimeout(r, 500)); 
+      try {
+          await EpubService.generateEpub(project);
+      } catch (e) {
+          console.error(e);
+          alert("Falha na exportação.");
+      } finally {
+          setIsProcessing(false);
+      }
+  };
+
   const handleShare = () => {
-      // Simulate link generation
       const shareLink = `https://lumina.app/share/${project.id}?ref=collaboration`;
       
       if (navigator.clipboard) {
@@ -234,7 +328,6 @@ const App: React.FC = () => {
   };
 
   // --- NEW ASYNC BATCHED LAYOUT ENGINE ---
-  // Completely refactored to handle unlimited pages via queue + event loop yielding
   const layoutContentIntoPages = async (
       rawText: string, 
       images: string[], 
@@ -281,23 +374,24 @@ const App: React.FC = () => {
          }
       ]);
 
-      // Split text into paragraphs using a loose regex to catch both double and single newline flows
-      // If double newlines exist, prefer them. If not, use single.
+      // Robust paragraph splitting
       let paragraphs: string[] = [];
-      if (rawText.includes('\n\n')) {
-          paragraphs = rawText.split(/\n\s*\n/);
+      // Normalize line endings
+      const normalizedText = rawText.replace(/\r\n/g, '\n');
+      
+      if (normalizedText.includes('\n\n')) {
+          paragraphs = normalizedText.split(/\n\s*\n/);
       } else {
-          // Fallback for dense PDF exports
-          paragraphs = rawText.split(/\n/);
+          paragraphs = normalizedText.split(/\n/);
       }
       
       const queue = [...paragraphs];
       let iterations = 0;
 
-      // Process Queue
+      // Process Queue with larger batch size for better performance on large files
       while (queue.length > 0) {
-          // Yield to UI thread every 20 items to prevent freezing
-          if (iterations % 20 === 0) {
+          // Increase batch size to 50
+          if (iterations % 50 === 0) {
               await new Promise(resolve => setTimeout(resolve, 0));
           }
           iterations++;
@@ -369,8 +463,14 @@ const App: React.FC = () => {
 
                const splitIndex = Math.floor(linesFit * charsPerLine);
                let safeSplit = content.lastIndexOf(' ', splitIndex);
-               // If no safe split found close enough, hard split
-               if (safeSplit === -1 || safeSplit < splitIndex * 0.5) safeSplit = splitIndex;
+               
+               // Robust split fallback logic
+               if (safeSplit === -1 || safeSplit < splitIndex * 0.5) {
+                   // If no space close enough, force split at index
+                   safeSplit = splitIndex;
+                   // Ensure we don't exceed content length (though logic above implies content > space)
+                   if (safeSplit > content.length) safeSplit = content.length;
+               }
 
                const partA = content.substring(0, safeSplit).trim();
                const partB = content.substring(safeSplit).trim();
@@ -392,7 +492,7 @@ const App: React.FC = () => {
           }
       }
       
-      // Inject Images at the end (or interleave if we had logic)
+      // Inject Images at the end
       if (images.length > 0) {
            pushPage();
            images.forEach((img, idx) => {
@@ -455,7 +555,6 @@ const App: React.FC = () => {
           if (textContent) {
               setLoadingMessage("Diagramando páginas (Análise de fluxo)...");
               
-              // Use await with the new async engine
               const newPages = await layoutContentIntoPages(
                   textContent, 
                   extractedImages, 
@@ -518,7 +617,6 @@ const App: React.FC = () => {
               });
           });
 
-          // Use await with the new async engine
           const newPages = await layoutContentIntoPages(
               combinedText, 
               collectedImages, 
@@ -548,6 +646,10 @@ const App: React.FC = () => {
       
       {showPreflightModal && (
           <PreflightModal result={preflightResult} onClose={() => setShowPreflightModal(false)} />
+      )}
+
+      {showSummaryModal && (
+          <SummaryModal summary={summaryResult} onClose={() => setShowSummaryModal(false)} />
       )}
 
       <input 
@@ -637,6 +739,20 @@ const App: React.FC = () => {
 
              <div className="h-6 w-[1px] bg-slate-700 mx-1"></div>
 
+             {/* SUMMARY AI */}
+             <button 
+                onClick={handleGenerateSummary}
+                disabled={isSummaryLoading}
+                className="text-xs font-semibold bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded border border-slate-600 flex items-center gap-2 disabled:opacity-50"
+             >
+                 {isSummaryLoading ? (
+                     <Icons.Loader2 size={14} className="animate-spin text-purple-400" />
+                 ) : (
+                     <Icons.BookText size={14} className="text-purple-400"/>
+                 )}
+                 Resumo IA
+             </button>
+
              {/* PREFLIGHT */}
              <button 
                 onClick={handlePreflight}
@@ -661,7 +777,10 @@ const App: React.FC = () => {
              </button>
 
              {/* EXPORT BUTTON */}
-             <button className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 px-4 py-1.5 rounded text-xs font-bold uppercase tracking-wide flex items-center gap-2">
+             <button 
+                 onClick={handleExportEpub}
+                 className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 px-4 py-1.5 rounded text-xs font-bold uppercase tracking-wide flex items-center gap-2"
+             >
                  <Icons.Download size={14} /> Exportar
              </button>
         </div>

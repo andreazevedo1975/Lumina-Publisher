@@ -37,6 +37,12 @@ export const DEFAULT_BOX: BoxStyle = {
   backgroundColor: 'transparent',
   opacity: 1,
   filter: 'none',
+  brightness: 1,
+  contrast: 1,
+  grayscale: 0,
+  sepia: 0,
+  blur: 0,
+  borderRadius: 0,
   objectFit: 'cover'
 };
 

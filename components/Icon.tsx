@@ -46,7 +46,9 @@ import {
   Indent,
   Outdent,
   Eraser,
-  Share2
+  Share2,
+  BookText,
+  Strikethrough
 } from 'lucide-react';
 
 export const Icons = {
@@ -95,5 +97,7 @@ export const Icons = {
   Indent,
   Outdent,
   Eraser,
-  Share2
+  Share2,
+  BookText,
+  Strikethrough
 };

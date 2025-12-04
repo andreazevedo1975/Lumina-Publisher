@@ -73,6 +73,10 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
           // If editing text, do not delete element on backspace/delete
           if (editingId) return;
 
+          // Prevent deletion if focus is on an input or textarea (e.g. sidebar inputs)
+          const activeElementTag = document.activeElement?.tagName.toLowerCase();
+          if (activeElementTag === 'input' || activeElementTag === 'textarea') return;
+
           if (project.activeElementId && (e.key === 'Delete' || e.key === 'Backspace')) {
               onRemoveElement(project.activeElementId);
           }
@@ -151,7 +155,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
                   onClick={(e) => { e.stopPropagation(); onEditStart(elementId); }}
                   className="bg-blue-600 text-white text-[10px] px-2 py-1 rounded shadow flex items-center gap-1 hover:bg-blue-500"
                 >
-                    <Icons.Edit size={10} /> Editar
+                    <Icons.Edit size={10} /> Editar Texto
                 </button>
            )}
            <button 
@@ -159,12 +163,14 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
               className="bg-red-600 text-white text-[10px] px-2 py-1 rounded shadow flex items-center gap-1 hover:bg-red-500"
               title="Excluir Elemento (Del)"
            >
-               <Icons.Trash2 size={10} />
+               <Icons.Trash2 size={10} /> Excluir
            </button>
       </div>
   );
 
   const ImageToolbar = ({ elementId, element }: { elementId: string, element: PageElement }) => {
+      const [showFilters, setShowFilters] = useState(false);
+
       const handleSwap = (e: React.ChangeEvent<HTMLInputElement>) => {
           if (e.target.files?.[0]) {
               const reader = new FileReader();
@@ -178,33 +184,102 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
       };
 
       const toggleFit = () => {
-          const nextFit = element.style.objectFit === 'contain' ? 'cover' : 'contain'; // Simple toggle for now
-          // Type casting for simple update 
+          const nextFit = element.style.objectFit === 'contain' ? 'cover' : 'contain'; 
           onElementUpdate(elementId, { style: { ...element.style, objectFit: nextFit } } as any);
       };
 
-      const toggleGray = () => {
-          const isGray = element.style.filter?.includes('grayscale');
-          onElementUpdate(elementId, { style: { ...element.style, filter: isGray ? 'none' : 'grayscale(100%)' } } as any);
-      }
+      const updateStyle = (key: string, value: any) => {
+          onElementUpdate(elementId, { style: { ...element.style, [key]: value } } as any);
+      };
 
       return (
           <div 
-             className="absolute -top-12 left-0 z-[100] flex bg-slate-900 border border-slate-700 rounded shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 items-center"
+             className="absolute -top-12 left-0 z-[100] flex flex-col bg-slate-900 border border-slate-700 rounded shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
              onMouseDown={(e) => e.preventDefault()}
           >
-              <button onClick={() => fileInputRef.current?.click()} className="p-2 hover:bg-slate-800 text-slate-300 hover:text-white border-r border-slate-700 flex items-center gap-1" title="Trocar Imagem">
-                  <Icons.RefreshCw size={14} /> <span className="text-[10px]">Trocar</span>
-              </button>
-              <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleSwap} />
-              
-              <button onClick={toggleFit} className="p-2 hover:bg-slate-800 text-slate-300 hover:text-white border-r border-slate-700 flex items-center gap-1" title="Ajuste (Cover/Contain)">
-                  <Icons.Move size={14} /> <span className="text-[10px]">{element.style.objectFit === 'contain' ? 'Ajustar' : 'Preencher'}</span>
-              </button>
+              <div className="flex items-center">
+                <button onClick={() => fileInputRef.current?.click()} className="p-2 hover:bg-slate-800 text-slate-300 hover:text-white border-r border-slate-700 flex items-center gap-1" title="Trocar Imagem">
+                    <Icons.RefreshCw size={14} /> <span className="text-[10px]">Trocar</span>
+                </button>
+                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleSwap} />
+                
+                <button onClick={toggleFit} className="p-2 hover:bg-slate-800 text-slate-300 hover:text-white border-r border-slate-700 flex items-center gap-1" title="Ajuste (Cover/Contain)">
+                    <Icons.Move size={14} /> <span className="text-[10px]">{element.style.objectFit === 'contain' ? 'Ajustar' : 'Preencher'}</span>
+                </button>
 
-              <button onClick={toggleGray} className="p-2 hover:bg-slate-800 text-slate-300 hover:text-white flex items-center gap-1" title="P&B">
-                  <Icons.Palette size={14} /> <span className="text-[10px]">P&B</span>
-              </button>
+                <button 
+                    onClick={() => setShowFilters(!showFilters)} 
+                    className={`p-2 hover:bg-slate-800 border-r border-slate-700 flex items-center gap-1 ${showFilters ? 'text-blue-400 bg-slate-800' : 'text-slate-300'}`} 
+                    title="Editar Propriedades"
+                >
+                    <Icons.Palette size={14} /> <span className="text-[10px]">Editar</span>
+                </button>
+              </div>
+
+              {showFilters && (
+                  <div className="p-3 bg-slate-800 border-t border-slate-700 grid gap-3 min-w-[200px]">
+                      
+                      <div className="space-y-1">
+                          <div className="flex justify-between text-[10px] text-slate-400">
+                              <span>Brilho</span>
+                              <span>{Math.round((element.style.brightness || 1) * 100)}%</span>
+                          </div>
+                          <input 
+                              type="range" min="0" max="2" step="0.1"
+                              value={element.style.brightness || 1}
+                              onChange={(e) => updateStyle('brightness', parseFloat(e.target.value))}
+                              className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                          />
+                      </div>
+
+                      <div className="space-y-1">
+                          <div className="flex justify-between text-[10px] text-slate-400">
+                              <span>Contraste</span>
+                              <span>{Math.round((element.style.contrast || 1) * 100)}%</span>
+                          </div>
+                          <input 
+                              type="range" min="0" max="2" step="0.1"
+                              value={element.style.contrast || 1}
+                              onChange={(e) => updateStyle('contrast', parseFloat(e.target.value))}
+                              className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                          />
+                      </div>
+
+                      <div className="space-y-1">
+                          <div className="flex justify-between text-[10px] text-slate-400">
+                              <span>Arredondamento</span>
+                              <span>{element.style.borderRadius || 0}px</span>
+                          </div>
+                          <input 
+                              type="range" min="0" max="50" step="1"
+                              value={element.style.borderRadius || 0}
+                              onChange={(e) => updateStyle('borderRadius', parseInt(e.target.value))}
+                              className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                          />
+                      </div>
+
+                      <div className="flex justify-between gap-1 pt-1">
+                           <button 
+                              onClick={() => updateStyle('grayscale', element.style.grayscale ? 0 : 1)}
+                              className={`flex-1 py-1 text-[10px] rounded border ${element.style.grayscale ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-400'}`}
+                           >
+                               P&B
+                           </button>
+                           <button 
+                              onClick={() => updateStyle('sepia', element.style.sepia ? 0 : 1)}
+                              className={`flex-1 py-1 text-[10px] rounded border ${element.style.sepia ? 'bg-amber-700 border-amber-600 text-white' : 'bg-slate-700 border-slate-600 text-slate-400'}`}
+                           >
+                               Sépia
+                           </button>
+                           <button 
+                              onClick={() => updateStyle('blur', element.style.blur ? 0 : 4)}
+                              className={`flex-1 py-1 text-[10px] rounded border ${element.style.blur ? 'bg-slate-500 border-slate-400 text-white' : 'bg-slate-700 border-slate-600 text-slate-400'}`}
+                           >
+                               Blur
+                           </button>
+                      </div>
+                  </div>
+              )}
           </div>
       )
   };
@@ -226,6 +301,18 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
         displayContent = displayContent.replace(/#/, (pageIndex + 1).toString()); // Simple #
     }
     // -------------------------------------------------------
+
+    // Construct Composite Filter
+    const filterParts = [];
+    if (el.style.brightness !== undefined && el.style.brightness !== 1) filterParts.push(`brightness(${el.style.brightness})`);
+    if (el.style.contrast !== undefined && el.style.contrast !== 1) filterParts.push(`contrast(${el.style.contrast})`);
+    if (el.style.grayscale) filterParts.push(`grayscale(${el.style.grayscale * 100}%)`);
+    if (el.style.sepia) filterParts.push(`sepia(${el.style.sepia * 100}%)`);
+    if (el.style.blur) filterParts.push(`blur(${el.style.blur}px)`);
+    // Legacy support
+    if (el.style.filter && el.style.filter !== 'none' && filterParts.length === 0) filterParts.push(el.style.filter);
+    
+    const computedFilter = filterParts.length > 0 ? filterParts.join(' ') : 'none';
 
     const baseStyle: React.CSSProperties = {
       position: 'absolute',
@@ -249,10 +336,11 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
       borderWidth: `${el.style.borderWidth}px`,
       borderColor: el.style.borderColor,
       borderStyle: el.style.borderWidth > 0 ? 'solid' : 'none',
+      borderRadius: `${el.style.borderRadius || 0}px`,
       backgroundColor: el.style.backgroundColor,
 
       // Effects
-      filter: el.style.filter || 'none',
+      filter: computedFilter,
 
       // Typography
       fontFamily: el.style.fontFamily,

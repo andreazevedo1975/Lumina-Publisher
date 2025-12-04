@@ -61,8 +61,15 @@ export interface BoxStyle {
   borderColor: string;
   backgroundColor: string;
   opacity: number;
-  filter: string; // New: CSS Filter support (e.g., grayscale)
-  objectFit?: 'fill' | 'contain' | 'cover' | 'none' | 'scale-down'; // Added for Image element sizing
+  filter: string; // Legacy string support
+  // New specific props for composition
+  brightness?: number;
+  contrast?: number;
+  grayscale?: number; // 0 or 1 (boolean-ish)
+  sepia?: number;     // 0 or 1
+  blur?: number;      // px
+  borderRadius?: number; // px
+  objectFit?: 'fill' | 'contain' | 'cover' | 'none' | 'scale-down'; 
 }
 
 export interface PageElement {
