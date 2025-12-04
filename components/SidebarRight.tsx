@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Project, PageElement, Unit, ColorSpace, ColorSwatch, MasterPage, ElementType } from '../types';
 import { Icons } from './Icon';
@@ -146,8 +145,9 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
   const handleAiCopyPolish = async () => {
     if (!activeElement || activeElement.type !== 'TEXT') return;
     setAiLoading(true);
-    const newText = await GeminiService.suggestCopyEdit(activeElement.content.replace(/<[^>]*>?/gm, ''));
-    onUpdateElement(activeElement.id, { content: `<p>${newText}</p>` });
+    // Send content directly, allowing AI to preserve HTML structure
+    const newContent = await GeminiService.suggestCopyEdit(activeElement.content);
+    onUpdateElement(activeElement.id, { content: newContent });
     setAiLoading(false);
   }
 
@@ -432,17 +432,56 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
             <div className="border-t border-slate-700"></div>
             <div className="space-y-3">
                 <h3 className="text-xs font-bold text-slate-500">EFEITOS DE IMAGEM</h3>
-                <div className="flex items-center justify-between bg-slate-800 rounded p-2 border border-slate-700">
-                    <span className="text-xs text-slate-300">Tons de Cinza</span>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                        <input 
-                            type="checkbox" 
-                            className="sr-only peer"
-                            checked={activeElement.style.filter?.includes('grayscale')}
-                            onChange={(e) => onUpdateStyle(activeElement.id, { filter: e.target.checked ? 'grayscale(100%)' : 'none' })}
-                        />
-                        <div className="w-9 h-5 bg-slate-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                    </label>
+                
+                <div className="space-y-1">
+                     <label className="text-[10px] text-slate-500">Brilho ({Math.round((activeElement.style.brightness || 1) * 100)}%)</label>
+                     <input 
+                        type="range" min="0" max="2" step="0.1" 
+                        value={activeElement.style.brightness || 1} 
+                        onChange={(e) => onUpdateStyle(activeElement.id, { brightness: parseFloat(e.target.value) })}
+                        className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                     />
+                </div>
+                
+                <div className="space-y-1">
+                     <label className="text-[10px] text-slate-500">Contraste ({Math.round((activeElement.style.contrast || 1) * 100)}%)</label>
+                     <input 
+                        type="range" min="0" max="2" step="0.1" 
+                        value={activeElement.style.contrast || 1} 
+                        onChange={(e) => onUpdateStyle(activeElement.id, { contrast: parseFloat(e.target.value) })}
+                        className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                     />
+                </div>
+
+                <div className="space-y-1">
+                     <label className="text-[10px] text-slate-500">Arredondamento ({activeElement.style.borderRadius || 0}px)</label>
+                     <input 
+                        type="range" min="0" max="100" step="1" 
+                        value={activeElement.style.borderRadius || 0} 
+                        onChange={(e) => onUpdateStyle(activeElement.id, { borderRadius: parseInt(e.target.value) })}
+                        className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                     />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-2">
+                    <button 
+                        onClick={() => onUpdateStyle(activeElement.id, { filter: activeElement.style.filter?.includes('grayscale') ? 'none' : 'grayscale(100%)' })}
+                        className={`text-[10px] py-1.5 rounded border border-slate-700 ${activeElement.style.filter?.includes('grayscale') ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}
+                    >
+                        P&B
+                    </button>
+                    <button 
+                         onClick={() => onUpdateStyle(activeElement.id, { filter: activeElement.style.filter?.includes('sepia') ? 'none' : 'sepia(100%)' })}
+                        className={`text-[10px] py-1.5 rounded border border-slate-700 ${activeElement.style.filter?.includes('sepia') ? 'bg-amber-700 text-white' : 'bg-slate-800 text-slate-400'}`}
+                    >
+                        Sépia
+                    </button>
+                    <button 
+                         onClick={() => onUpdateStyle(activeElement.id, { filter: activeElement.style.filter?.includes('blur') ? 'none' : 'blur(4px)' })}
+                        className={`text-[10px] py-1.5 rounded border border-slate-700 ${activeElement.style.filter?.includes('blur') ? 'bg-slate-600 text-white' : 'bg-slate-800 text-slate-400'}`}
+                    >
+                        Blur
+                    </button>
                 </div>
             </div>
             </>
@@ -498,33 +537,31 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
 
       {activeTab === 'text' && activeElement.type === 'TEXT' && (
         <div className="p-4 space-y-4">
-          <div className="space-y-2">
-              <h3 className="text-xs font-bold text-slate-500">CONTEÚDO</h3>
-              <div className="p-3 bg-slate-800/50 rounded border border-slate-700 border-dashed text-center">
-                  <Icons.Edit className="mx-auto text-slate-500 mb-2" size={20} />
-                  <p className="text-xs text-slate-400">Dê um duplo clique no elemento na tela para editar o texto visualmente.</p>
-              </div>
-              
-              <button 
-                  onClick={() => onEditStart(activeElement.id)}
-                  className="w-full py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 text-xs rounded border border-blue-500/50 flex items-center justify-center gap-2 transition-colors mt-2"
-              >
-                  <Icons.Edit size={12} /> Ativar Modo de Edição
-              </button>
+          
+          {/* Style Toolbar (Word-like) */}
+          <div className="flex items-center justify-between bg-slate-800 p-1.5 rounded border border-slate-700">
+             <div className="flex gap-1">
+                 <button onClick={() => onUpdateStyle(activeElement.id, { fontWeight: activeElement.style.fontWeight === 700 ? 400 : 700 })} className={`p-1 rounded ${activeElement.style.fontWeight === 700 ? 'bg-blue-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`} title="Negrito"><Icons.Bold size={14}/></button>
+                 <button onClick={() => onUpdateStyle(activeElement.id, { fontStyle: activeElement.style.fontStyle === 'italic' ? 'normal' : 'italic' })} className={`p-1 rounded ${activeElement.style.fontStyle === 'italic' ? 'bg-blue-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`} title="Itálico"><Icons.Italic size={14}/></button>
+                 <button onClick={() => onUpdateStyle(activeElement.id, { textDecoration: activeElement.style.textDecoration === 'underline' ? 'none' : 'underline' })} className={`p-1 rounded ${activeElement.style.textDecoration === 'underline' ? 'bg-blue-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`} title="Sublinhado"><Icons.Underline size={14}/></button>
+                 <button onClick={() => onUpdateStyle(activeElement.id, { textDecoration: activeElement.style.textDecoration === 'line-through' ? 'none' : 'line-through' })} className={`p-1 rounded ${activeElement.style.textDecoration === 'line-through' ? 'bg-blue-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`} title="Tachado"><Icons.Eraser size={14}/></button>
+             </div>
+             <div className="w-[1px] h-4 bg-slate-600"></div>
+             <button onClick={() => onUpdateStyle(activeElement.id, { textTransform: activeElement.style.textTransform === 'uppercase' ? 'none' : 'uppercase' })} className={`p-1 rounded ${activeElement.style.textTransform === 'uppercase' ? 'bg-blue-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`} title="Maiúsculas"><Icons.Type size={14}/></button>
           </div>
 
-          <div className="border-t border-slate-700 my-2"></div>
-
-          <div className="flex justify-between items-center">
-            <h3 className="text-xs font-bold text-slate-500">CARACTERE</h3>
-            <div className="flex gap-1">
-               <button className="p-1 hover:bg-slate-700 rounded"><Icons.Bold size={12} /></button>
-               <button className="p-1 hover:bg-slate-700 rounded"><Icons.Italic size={12} /></button>
-               <button className="p-1 hover:bg-slate-700 rounded"><Icons.Underline size={12} /></button>
-            </div>
+          <div className="space-y-2">
+              <h3 className="text-[10px] font-bold text-slate-500 uppercase">Parágrafo</h3>
+              <div className="flex bg-slate-800 rounded p-1 border border-slate-700">
+                 <button onClick={() => onUpdateStyle(activeElement.id, { textAlign: 'left' })} className={`flex-1 py-1 rounded flex justify-center ${activeElement.style.textAlign === 'left' ? 'bg-slate-600 text-white' : 'text-slate-500 hover:text-white'}`}><Icons.AlignLeft size={14}/></button>
+                 <button onClick={() => onUpdateStyle(activeElement.id, { textAlign: 'center' })} className={`flex-1 py-1 rounded flex justify-center ${activeElement.style.textAlign === 'center' ? 'bg-slate-600 text-white' : 'text-slate-500 hover:text-white'}`}><Icons.AlignCenter size={14}/></button>
+                 <button onClick={() => onUpdateStyle(activeElement.id, { textAlign: 'right' })} className={`flex-1 py-1 rounded flex justify-center ${activeElement.style.textAlign === 'right' ? 'bg-slate-600 text-white' : 'text-slate-500 hover:text-white'}`}><Icons.AlignRight size={14}/></button>
+                 <button onClick={() => onUpdateStyle(activeElement.id, { textAlign: 'justify' })} className={`flex-1 py-1 rounded flex justify-center ${activeElement.style.textAlign === 'justify' ? 'bg-slate-600 text-white' : 'text-slate-500 hover:text-white'}`}><Icons.AlignJustify size={14}/></button>
+              </div>
           </div>
           
           <div className="space-y-3">
+             <h3 className="text-[10px] font-bold text-slate-500 uppercase">Fonte</h3>
              <select 
                 className="w-full bg-slate-800 border border-slate-700 rounded text-xs py-1.5 px-2 text-slate-200"
                 value={activeElement.style.fontFamily}
@@ -573,7 +610,7 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
              <div className="space-y-4 pt-2">
                  <div className="space-y-1">
                     <div className="flex justify-between">
-                        <label className="text-[10px] text-slate-500">Tracking (Entreletras)</label>
+                        <label className="text-[10px] text-slate-500" title="Ajuste o espaçamento entre caracteres (Tracking/Kerning Manual)">Kerning / Tracking</label>
                         <span className="text-[10px] text-slate-400">{activeElement.style.letterSpacing}em</span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -581,7 +618,7 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                             type="range" 
                             min="-0.2" 
                             max="1" 
-                            step="0.01" 
+                            step="0.005" 
                             value={activeElement.style.letterSpacing} 
                             onChange={(e) => onUpdateStyle(activeElement.id, { letterSpacing: parseFloat(e.target.value) })} 
                             className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" 
@@ -598,7 +635,7 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
 
                  <div className="space-y-1">
                     <div className="flex justify-between">
-                        <label className="text-[10px] text-slate-500">Entre Palavras</label>
+                        <label className="text-[10px] text-slate-500" title="Ajuste o espaçamento entre palavras">Entre Palavras</label>
                         <span className="text-[10px] text-slate-400">{activeElement.style.wordSpacing || 0}em</span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -646,7 +683,7 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                  <div className="grid grid-cols-2 gap-3">
                      <div className="space-y-1">
                         <div className="flex justify-between">
-                            <label className="text-[10px] text-slate-500">Widows (Topo)</label>
+                            <label className="text-[10px] text-slate-500" title="Mínimo de linhas deixadas no topo da próxima página">Widows (Topo)</label>
                             <span className="text-[10px] text-slate-400">{activeElement.style.widows || 2}</span>
                         </div>
                         <div className="flex items-center gap-2">
@@ -664,14 +701,17 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                                 min="1" 
                                 max="10" 
                                 value={activeElement.style.widows || 2} 
-                                onChange={(e) => onUpdateStyle(activeElement.id, { widows: parseInt(e.target.value) })} 
+                                onChange={(e) => {
+                                    const val = parseInt(e.target.value);
+                                    if (!isNaN(val)) onUpdateStyle(activeElement.id, { widows: Math.max(1, val) });
+                                }} 
                                 className="w-8 bg-slate-800 border border-slate-700 rounded text-[10px] py-0.5 px-1 text-center" 
                             />
                         </div>
                      </div>
                      <div className="space-y-1">
                         <div className="flex justify-between">
-                            <label className="text-[10px] text-slate-500">Orphans (Base)</label>
+                            <label className="text-[10px] text-slate-500" title="Mínimo de linhas deixadas no final da página anterior">Orphans (Base)</label>
                             <span className="text-[10px] text-slate-400">{activeElement.style.orphans || 2}</span>
                         </div>
                         <div className="flex items-center gap-2">
@@ -689,13 +729,26 @@ const SidebarRight: React.FC<SidebarRightProps> = ({
                                 min="1" 
                                 max="10" 
                                 value={activeElement.style.orphans || 2} 
-                                onChange={(e) => onUpdateStyle(activeElement.id, { orphans: parseInt(e.target.value) })} 
+                                onChange={(e) => {
+                                    const val = parseInt(e.target.value);
+                                    if (!isNaN(val)) onUpdateStyle(activeElement.id, { orphans: Math.max(1, val) });
+                                }} 
                                 className="w-8 bg-slate-800 border border-slate-700 rounded text-[10px] py-0.5 px-1 text-center" 
                             />
                         </div>
                      </div>
                  </div>
              </div>
+          </div>
+          
+          <div className="space-y-2 pt-2 border-t border-slate-700">
+              <h3 className="text-[10px] font-bold text-slate-500 uppercase">Edição Manual</h3>
+              <button 
+                  onClick={() => onEditStart(activeElement.id)}
+                  className="w-full py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 text-xs rounded border border-blue-500/50 flex items-center justify-center gap-2 transition-colors"
+              >
+                  <Icons.Edit size={12} /> Editar Texto na Tela
+              </button>
           </div>
         </div>
       )}

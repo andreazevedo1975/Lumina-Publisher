@@ -1,3 +1,4 @@
+
 import React, { useState, useReducer, useEffect, useRef } from 'react';
 import SidebarLeft from './components/SidebarLeft';
 import SidebarRight from './components/SidebarRight';
@@ -86,6 +87,7 @@ function projectReducer(state: Project, action: Action): Project {
            pages: state.pages.map(p => p.id === state.activePageId ? { ...p, elements: [...p.elements, newElement]} : p)
        };
     case 'ADD_ASSET_TO_LIBRARY':
+        if (state.assets.includes(action.payload)) return state;
         return {
             ...state,
             assets: [action.payload, ...state.assets]
@@ -124,14 +126,52 @@ function projectReducer(state: Project, action: Action): Project {
   }
 }
 
+const PreflightModal = ({ result, onClose }: { result: string | null, onClose: () => void }) => {
+    if (!result) return null;
+    return (
+        <div className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-lg shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+                <div className="bg-slate-900 px-6 py-4 flex justify-between items-center">
+                    <h3 className="text-white font-bold flex items-center gap-2">
+                        <Icons.CheckCircle className="text-green-500" /> Relatório de Verificação Editorial
+                    </h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-white">
+                        <Icons.Move size={20} className="rotate-45" /> {/* Close Icon simulated */}
+                    </button>
+                </div>
+                <div className="p-6 overflow-y-auto font-sans text-slate-800 leading-relaxed whitespace-pre-wrap">
+                    {result}
+                </div>
+                <div className="bg-slate-50 p-4 border-t flex justify-end">
+                    <button 
+                        onClick={onClose}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded font-bold shadow transition-colors"
+                    >
+                        Entendi, obrigado!
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 const App: React.FC = () => {
   const [project, dispatch] = useReducer(projectReducer, INITIAL_PROJECT);
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.EDIT);
-  const [preflightStatus, setPreflightStatus] = useState<string | null>(null);
+  
+  // Preflight State
+  const [preflightResult, setPreflightResult] = useState<string | null>(null);
+  const [showPreflightModal, setShowPreflightModal] = useState(false);
+  const [isPreflightLoading, setIsPreflightLoading] = useState(false);
+
+  // Share State
+  const [shareState, setShareState] = useState<'idle' | 'copied'>('idle');
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("Processando...");
   const [autoLayoutRunning, setAutoLayoutRunning] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [autoExtractImages, setAutoExtractImages] = useState(true);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -139,12 +179,10 @@ const App: React.FC = () => {
   const masterPage = project.masterPages.find(mp => mp.id === activePage.masterPageId) || project.masterPages[0];
   const activeElement = activePage.elements.find(el => el.id === project.activeElementId);
 
-  // Drop handler for canvas
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const dataString = e.dataTransfer.getData('text/plain');
     if (dataString) {
-        // Parse metadata (format: "url|flag1|flag2")
         const parts = dataString.split('|');
         const url = parts[0];
         const isGrayscale = parts.includes('grayscale');
@@ -169,16 +207,211 @@ const App: React.FC = () => {
   const handleDragOver = (e: React.DragEvent) => e.preventDefault();
 
   const handlePreflight = async () => {
-      setPreflightStatus("Executando verificação com Gemini...");
-      const summary = `Project has ${project.pages.length} pages. Active page has ${activePage.elements.length} elements.`;
+      setIsPreflightLoading(true);
+      const summary = `O livro se chama "${project.name}". Possui ${project.pages.length} páginas. A página atual tem ${activePage.elements.length} elementos.`;
       const result = await GeminiService.runPreflightCheck(summary);
-      setPreflightStatus(result);
-      setTimeout(() => setPreflightStatus(null), 5000);
+      setPreflightResult(result);
+      setShowPreflightModal(true);
+      setIsPreflightLoading(false);
   };
 
-  // --- SMART IMPORT LOGIC ---
+  const handleShare = () => {
+      // Simulate link generation
+      const shareLink = `https://lumina.app/share/${project.id}?ref=collaboration`;
+      
+      if (navigator.clipboard) {
+          navigator.clipboard.writeText(shareLink).then(() => {
+              setShareState('copied');
+              setTimeout(() => setShareState('idle'), 2000);
+          });
+      } else {
+          alert(`Link gerado: ${shareLink}`);
+      }
+  };
+
   const triggerSmartImport = () => {
       fileInputRef.current?.click();
+  };
+
+  // --- NEW ASYNC BATCHED LAYOUT ENGINE ---
+  // Completely refactored to handle unlimited pages via queue + event loop yielding
+  const layoutContentIntoPages = async (
+      rawText: string, 
+      images: string[], 
+      projectTitle: string,
+      onProgress: (msg: string) => void
+  ): Promise<Page[]> => {
+      const newPages: Page[] = [];
+      let pageCounter = 1;
+
+      // Configuration
+      const PAGE_HEIGHT = 842;
+      const MARGIN_TOP = 50;
+      const MARGIN_BOTTOM = 50;
+      const CONTENT_WIDTH = 495;
+      const MARGIN_X = 50;
+      const USABLE_HEIGHT = PAGE_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM;
+
+      let currentElements: PageElement[] = [];
+      let currentY = MARGIN_TOP;
+
+      const createPage = (elements: PageElement[]) => {
+          newPages.push({
+              id: `page-${pageCounter++}`,
+              masterPageId: 'master-a',
+              elements: elements
+          });
+      };
+
+      const pushPage = () => {
+          createPage(currentElements);
+          currentElements = [];
+          currentY = MARGIN_TOP;
+          onProgress(`Gerando página ${pageCounter}...`);
+      };
+
+      // Create Cover Page
+      createPage([
+         {
+             id: `el-cover-${Date.now()}`,
+             type: ElementType.TEXT,
+             content: `<h1 style="font-size: 3em; color: #1e293b; text-align: center; margin-top: 200px;">${projectTitle}</h1>`,
+             style: { ...DEFAULT_TYPOGRAPHY, ...DEFAULT_BOX, fontSize: 16 },
+             x: MARGIN_X, y: 0, width: CONTENT_WIDTH, height: PAGE_HEIGHT, rotation: 0, locked: true
+         }
+      ]);
+
+      // Split text into paragraphs using a loose regex to catch both double and single newline flows
+      // If double newlines exist, prefer them. If not, use single.
+      let paragraphs: string[] = [];
+      if (rawText.includes('\n\n')) {
+          paragraphs = rawText.split(/\n\s*\n/);
+      } else {
+          // Fallback for dense PDF exports
+          paragraphs = rawText.split(/\n/);
+      }
+      
+      const queue = [...paragraphs];
+      let iterations = 0;
+
+      // Process Queue
+      while (queue.length > 0) {
+          // Yield to UI thread every 20 items to prevent freezing
+          if (iterations % 20 === 0) {
+              await new Promise(resolve => setTimeout(resolve, 0));
+          }
+          iterations++;
+
+          const content = queue.shift()?.trim();
+          if (!content) continue;
+
+          // Check for Headers
+          const isHeader = content.startsWith('#');
+          
+          if (isHeader) {
+              const level = content.match(/^#+/)?.[0].length || 1;
+              const text = content.replace(/^#+\s*/, '');
+              
+              if (level === 1 && currentY > MARGIN_TOP) pushPage();
+              if (level === 2 && (USABLE_HEIGHT - currentY < 200)) pushPage();
+
+              const fontSize = level === 1 ? 24 : level === 2 ? 18 : 14;
+              const estimatedHeight = level === 1 ? 60 : 40;
+
+              currentElements.push({
+                  id: `el-h-${Date.now()}-${Math.random()}`,
+                  type: ElementType.TEXT,
+                  content: `<h${level} style="margin: 0;">${text}</h${level}>`,
+                  style: { ...DEFAULT_TYPOGRAPHY, ...DEFAULT_BOX, fontSize, fontWeight: 700 },
+                  x: MARGIN_X, y: currentY, width: CONTENT_WIDTH, height: estimatedHeight,
+                  rotation: 0, locked: false
+              });
+
+              currentY += estimatedHeight + 10;
+              continue;
+          }
+
+          // Paragraph Processing
+          const fontSize = 12;
+          const lineHeightPx = fontSize * 1.5;
+          const charsPerLine = 85; 
+          
+          const totalChars = content.length;
+          const lines = Math.ceil(totalChars / charsPerLine);
+          const estimatedHeight = lines * lineHeightPx + 20;
+
+          if (currentY + estimatedHeight <= (PAGE_HEIGHT - MARGIN_BOTTOM)) {
+               currentElements.push({
+                   id: `el-p-${Date.now()}-${Math.random()}`,
+                   type: ElementType.TEXT,
+                   content: `<p>${content}</p>`,
+                   style: { ...DEFAULT_TYPOGRAPHY, ...DEFAULT_BOX, fontSize, lineHeight: 1.5, textAlign: 'justify' },
+                   x: MARGIN_X, y: currentY, width: CONTENT_WIDTH, height: estimatedHeight,
+                   rotation: 0, locked: false
+               });
+               currentY += estimatedHeight;
+          } else {
+               // Needs splitting
+               const remainingHeight = (PAGE_HEIGHT - MARGIN_BOTTOM) - currentY;
+               
+               if (remainingHeight < 40) {
+                   pushPage();
+                   queue.unshift(content); // Retry on new page
+                   continue;
+               }
+
+               const linesFit = Math.floor((remainingHeight - 10) / lineHeightPx);
+               if (linesFit <= 0) {
+                    pushPage();
+                    queue.unshift(content);
+                    continue;
+               }
+
+               const splitIndex = Math.floor(linesFit * charsPerLine);
+               let safeSplit = content.lastIndexOf(' ', splitIndex);
+               // If no safe split found close enough, hard split
+               if (safeSplit === -1 || safeSplit < splitIndex * 0.5) safeSplit = splitIndex;
+
+               const partA = content.substring(0, safeSplit).trim();
+               const partB = content.substring(safeSplit).trim();
+
+               if (partA) {
+                   const heightA = linesFit * lineHeightPx;
+                   currentElements.push({
+                       id: `el-p-split-${Date.now()}-${Math.random()}`,
+                       type: ElementType.TEXT,
+                       content: `<p>${partA}</p>`,
+                       style: { ...DEFAULT_TYPOGRAPHY, ...DEFAULT_BOX, fontSize, lineHeight: 1.5, textAlign: 'justify' },
+                       x: MARGIN_X, y: currentY, width: CONTENT_WIDTH, height: heightA,
+                       rotation: 0, locked: false
+                   });
+               }
+
+               pushPage();
+               if (partB) queue.unshift(partB); // Process remainder
+          }
+      }
+      
+      // Inject Images at the end (or interleave if we had logic)
+      if (images.length > 0) {
+           pushPage();
+           images.forEach((img, idx) => {
+               if (currentY + 300 > (PAGE_HEIGHT - MARGIN_BOTTOM)) pushPage();
+               currentElements.push({
+                   id: `el-img-${idx}-${Date.now()}`,
+                   type: ElementType.IMAGE,
+                   content: img,
+                   style: { ...DEFAULT_TYPOGRAPHY, ...DEFAULT_BOX },
+                   x: MARGIN_X, y: currentY, width: CONTENT_WIDTH, height: 280,
+                   rotation: 0, locked: false
+               });
+               currentY += 300;
+           });
+      }
+
+      if (currentElements.length > 0) pushPage();
+
+      return newPages;
   };
 
   const processImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -190,8 +423,8 @@ const App: React.FC = () => {
 
       try {
           let textContent = '';
+          let extractedImages: string[] = [];
 
-          // Handle Text/Markdown locally
           if (file.type === 'text/plain' || file.name.endsWith('.md')) {
                setLoadingMessage("Lendo arquivo de texto...");
                textContent = await new Promise((resolve) => {
@@ -200,157 +433,99 @@ const App: React.FC = () => {
                    reader.readAsText(file);
                });
           } 
-          // Handle PDF/DOCX via Gemini AI
           else if (file.type === 'application/pdf' || 
                    file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || 
                    file.name.endsWith('.docx')) {
-               setLoadingMessage("Lumina AI: Extraindo estrutura e texto do documento...");
-               textContent = await GeminiService.parseDocumentToMarkdown(file);
+               setLoadingMessage("Extraindo todo o conteúdo (isso pode levar um momento)...");
+               const result = await GeminiService.parseDocumentToMarkdown(file);
+               textContent = result.text;
+               extractedImages = result.images;
           } else {
-               alert("Formato de arquivo não suportado. Use .txt, .md, .pdf ou .docx");
+               alert("Formato de arquivo não suportado.");
                setIsProcessing(false);
                return;
           }
 
+          if (autoExtractImages && extractedImages.length > 0) {
+              setLoadingMessage(`Salvando ${extractedImages.length} imagens...`);
+              extractedImages.forEach(img => dispatch({ type: 'ADD_ASSET_TO_LIBRARY', payload: img }));
+              await new Promise(r => setTimeout(r, 200)); 
+          }
+
           if (textContent) {
-              setLoadingMessage("Gerando layout, tipografia e páginas...");
-              await new Promise(r => setTimeout(r, 500)); 
+              setLoadingMessage("Diagramando páginas (Análise de fluxo)...");
               
-              const newProject = generateProjectFromText(textContent, file.name);
+              // Use await with the new async engine
+              const newPages = await layoutContentIntoPages(
+                  textContent, 
+                  extractedImages, 
+                  file.name.replace(/\.[^/.]+$/, ""),
+                  (msg) => setLoadingMessage(msg)
+              );
+              
+              const newProject: Project = {
+                  ...INITIAL_PROJECT,
+                  id: `proj-${Date.now()}`,
+                  name: file.name.replace(/\.[^/.]+$/, ""),
+                  pages: newPages,
+                  activePageId: newPages[0]?.id || 'page-1',
+                  activeElementId: null,
+                  assets: Array.from(new Set([...project.assets, ...extractedImages]))
+              };
+              
               dispatch({ type: 'IMPORT_BOOK', payload: newProject });
           }
 
       } catch (error: any) {
           console.error("Import Error:", error);
-          const errorMsg = error?.message || error?.toString() || "Erro desconhecido";
-          alert(`Erro ao processar arquivo: ${errorMsg}\n\nVerifique se a chave de API está configurada corretamente.`);
+          alert(`Erro ao processar: ${error?.message || "Erro desconhecido"}`);
       } finally {
           setIsProcessing(false);
-          if (fileInputRef.current) fileInputRef.current.value = ''; // Reset input
+          if (fileInputRef.current) fileInputRef.current.value = ''; 
       }
   };
 
-  // --- AUTO LAYOUT LOGIC ---
   const runAutoLayout = async () => {
       if (autoLayoutRunning) return;
       
-      const confirmRun = window.confirm("Atenção: A auto-diagramação irá reorganizar TODO o projeto, recriando páginas e posicionando elementos automaticamente. Deseja continuar?");
+      const confirmRun = window.confirm("Atenção: Isso irá extrair o texto atual e re-diagramar todo o projeto do zero. Continuar?");
       if (!confirmRun) return;
 
       setAutoLayoutRunning(true);
-      setLoadingMessage("Analisando conteúdo e re-paginando...");
+      setLoadingMessage("Reorganizando layout...");
       setIsProcessing(true);
-
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, 500));
 
       try {
-          // 1. Extract all content linearly
-          let allContent: {type: ElementType, content: string, style?: any}[] = [];
-          
-          project.pages.forEach(p => {
+          let combinedText = "";
+          let collectedImages: string[] = [];
+
+          const sortedPages = [...project.pages].sort((a,b) => {
+              const numA = parseInt(a.id.replace('page-', '')) || 0;
+              const numB = parseInt(b.id.replace('page-', '')) || 0;
+              return numA - numB;
+          });
+
+          sortedPages.forEach(p => {
               const sortedEls = [...p.elements].sort((a,b) => (a.y - b.y) || (a.x - b.x));
               sortedEls.forEach(el => {
-                  if (el.type === ElementType.TEXT || el.type === ElementType.IMAGE) {
-                       allContent.push({
-                           type: el.type,
-                           content: el.content,
-                           style: el.style
-                       });
+                  if (el.type === ElementType.TEXT) {
+                      const txt = el.content.replace(/<h[1-6][^>]*>/g, '\n# ').replace(/<\/h[1-6]>/g, '\n').replace(/<[^>]+>/g, '');
+                      combinedText += txt + "\n\n";
+                  } else if (el.type === ElementType.IMAGE) {
+                      collectedImages.push(el.content);
                   }
               });
           });
 
-          // 2. Rebuild pages
-          const newPages: Page[] = [];
-          const CHARS_PER_PAGE = 1400; 
-          let currentTextBuffer = '';
-          let pageCounter = 1;
+          // Use await with the new async engine
+          const newPages = await layoutContentIntoPages(
+              combinedText, 
+              collectedImages, 
+              project.name,
+              (msg) => setLoadingMessage(msg)
+          );
 
-          const createPage = (elements: PageElement[]) => {
-               const pageId = `page-${pageCounter++}`;
-               newPages.push({
-                   id: pageId,
-                   masterPageId: 'master-a',
-                   elements: elements
-               });
-          };
-
-          let currentElements: PageElement[] = [];
-          let currentY = 50;
-
-          const flushTextBuffer = () => {
-              if (currentTextBuffer) {
-                  currentElements.push({
-                      id: `el-text-${Date.now()}-${Math.random()}`,
-                      type: ElementType.TEXT,
-                      content: currentTextBuffer,
-                      style: { ...DEFAULT_TYPOGRAPHY, ...DEFAULT_BOX, textAlign: 'justify' },
-                      x: 50, y: currentY, width: 495, height: Math.max(100, 750 - currentY),
-                      rotation: 0, locked: false
-                  });
-                  currentTextBuffer = '';
-              }
-          };
-
-          const pushNewPage = () => {
-              flushTextBuffer();
-              createPage(currentElements);
-              currentElements = [];
-              currentY = 50;
-          };
-
-          for (const item of allContent) {
-              if (item.type === ElementType.IMAGE) {
-                  if (currentY + 300 > 750) {
-                      pushNewPage();
-                  }
-                  
-                  flushTextBuffer();
-                  
-                  currentElements.push({
-                      id: `el-img-${Date.now()}-${Math.random()}`,
-                      type: ElementType.IMAGE,
-                      content: item.content,
-                      style: { ...DEFAULT_TYPOGRAPHY, ...DEFAULT_BOX },
-                      x: 50, y: currentY, width: 495, height: 280, 
-                      rotation: 0, locked: false
-                  });
-                  currentY += 300;
-              } 
-              else if (item.type === ElementType.TEXT) {
-                   const text = item.content.replace(/<[^>]*>/g, ' ').trim();
-                   if (!text) continue;
-
-                   const isHeader = item.content.includes('<h1') || item.content.includes('<h2');
-                   
-                   if (isHeader) {
-                       if (currentY > 200) pushNewPage();
-                       
-                       currentElements.push({
-                          id: `el-head-${Date.now()}-${Math.random()}`,
-                          type: ElementType.TEXT,
-                          content: item.content,
-                          style: { ...DEFAULT_TYPOGRAPHY, ...DEFAULT_BOX },
-                          x: 50, y: currentY, width: 495, height: 60,
-                          rotation: 0, locked: false
-                       });
-                       currentY += 80;
-                   } else {
-                       const pTag = `<p style="margin-bottom: 1em;">${text}</p>`;
-                       if (currentTextBuffer.length + pTag.length > CHARS_PER_PAGE) {
-                           pushNewPage();
-                           currentTextBuffer = pTag;
-                       } else {
-                           currentTextBuffer += pTag;
-                       }
-                   }
-              }
-          }
-
-          if (currentTextBuffer || currentElements.length > 0) {
-              pushNewPage();
-          }
-          
           dispatch({ 
               type: 'IMPORT_BOOK', 
               payload: { 
@@ -362,96 +537,19 @@ const App: React.FC = () => {
 
       } catch (e) {
           console.error("Auto Layout Error", e);
-          alert("Erro na auto-diagramação.");
       } finally {
           setIsProcessing(false);
           setAutoLayoutRunning(false);
       }
   };
 
-  const generateProjectFromText = (text: string, filename: string): Project => {
-      const lines = text.split('\n');
-      const title = lines[0].length < 100 ? lines[0].trim() : filename.replace(/\.(txt|md|pdf|docx)$/i, '');
-      const newPages: Page[] = [];
-      const contentLines = lines.length > 0 && lines[0].length < 100 ? lines.slice(1) : lines;
-      const CHARS_PER_PAGE = 1200;
-      let currentContent = '';
-      let pageCounter = 1;
-
-      const createPage = (contentHtml: string, isCover: boolean = false) => {
-          const pageId = `page-${pageCounter++}`;
-          let elements: PageElement[] = [];
-
-          if (isCover) {
-              elements.push({
-                  id: `el-${Date.now()}-${Math.random()}`,
-                  type: ElementType.TEXT,
-                  content: `<h1 style="font-size: 3em; color: #1e293b; text-align: center; margin-top: 200px;">${contentHtml}</h1><p style="text-align: center; color: #64748b; margin-top: 20px;">Um Auto-Layout Lumina</p>`,
-                  style: { ...DEFAULT_TYPOGRAPHY, ...DEFAULT_BOX, fontSize: 16 },
-                  x: 50, y: 0, width: 500, height: 842, rotation: 0, locked: true
-              });
-          } else {
-              elements.push({
-                  id: `el-${Date.now()}-${Math.random()}`,
-                  type: ElementType.TEXT,
-                  content: contentHtml,
-                  style: { ...DEFAULT_TYPOGRAPHY, ...DEFAULT_BOX, fontSize: 12, lineHeight: 1.6, textAlign: 'justify' },
-                  x: 50, y: 50, width: 495, height: 742, rotation: 0, locked: false
-              });
-          }
-
-          newPages.push({
-              id: pageId,
-              masterPageId: 'master-a',
-              elements: elements
-          });
-      };
-
-      createPage(title, true);
-
-      const paragraphs = contentLines.join('\n').split(/\n\s*\n/);
-      
-      for (let i = 0; i < paragraphs.length; i++) {
-          let para = paragraphs[i].trim();
-          if (!para) continue;
-
-          if (para.startsWith('#')) {
-             if (currentContent.length > 0) {
-                 createPage(currentContent);
-                 currentContent = '';
-             }
-             const level = para.match(/^#+/)?.[0].length || 1;
-             const text = para.replace(/^#+\s*/, '');
-             const fontSize = level === 1 ? '2em' : '1.5em';
-             currentContent += `<h${level} style="font-size: ${fontSize}; margin-bottom: 0.5em; font-weight: bold; color: #334155;">${text}</h${level}>`;
-          } else {
-              const pTag = `<p style="margin-bottom: 1em;">${para}</p>`;
-              if ((currentContent.length + pTag.length) > CHARS_PER_PAGE) {
-                  createPage(currentContent);
-                  currentContent = pTag;
-              } else {
-                  currentContent += pTag;
-              }
-          }
-      }
-
-      if (currentContent.length > 0) {
-          createPage(currentContent);
-      }
-
-      return {
-          ...INITIAL_PROJECT,
-          id: `proj-${Date.now()}`,
-          name: title,
-          pages: newPages,
-          activePageId: newPages[0].id,
-          activeElementId: null
-      };
-  };
-
   return (
     <div className="flex flex-col h-screen bg-slate-950 overflow-hidden font-sans">
       
+      {showPreflightModal && (
+          <PreflightModal result={preflightResult} onClose={() => setShowPreflightModal(false)} />
+      )}
+
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -508,6 +606,19 @@ const App: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
+             <div className="flex items-center gap-2 mr-2">
+                <input 
+                    type="checkbox" 
+                    id="autoExtract"
+                    checked={autoExtractImages} 
+                    onChange={(e) => setAutoExtractImages(e.target.checked)}
+                    className="rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-0 cursor-pointer"
+                />
+                <label htmlFor="autoExtract" className="text-xs text-slate-400 cursor-pointer select-none">
+                    Extrair Imagens
+                </label>
+             </div>
+
              <button 
                 onClick={triggerSmartImport}
                 className="group relative bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-1.5 rounded text-xs font-bold uppercase tracking-wide flex items-center gap-2 border border-slate-600 transition-all"
@@ -526,17 +637,30 @@ const App: React.FC = () => {
 
              <div className="h-6 w-[1px] bg-slate-700 mx-1"></div>
 
-             {preflightStatus && (
-                 <span className="text-xs text-yellow-400 animate-pulse mr-2 flex items-center gap-1">
-                     <Icons.AlertTriangle size={12}/> {preflightStatus}
-                 </span>
-             )}
+             {/* PREFLIGHT */}
              <button 
                 onClick={handlePreflight}
-                className="text-xs font-semibold bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded border border-slate-600 flex items-center gap-2"
+                disabled={isPreflightLoading}
+                className="text-xs font-semibold bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded border border-slate-600 flex items-center gap-2 disabled:opacity-50"
              >
-                 <Icons.CheckCircle size={14} className="text-green-500"/> Verificação
+                 {isPreflightLoading ? (
+                     <Icons.Loader2 size={14} className="animate-spin text-green-500" />
+                 ) : (
+                     <Icons.CheckCircle size={14} className="text-green-500"/>
+                 )}
+                 Verificação
              </button>
+
+             {/* SHARE BUTTON */}
+             <button 
+                onClick={handleShare}
+                className={`text-xs font-semibold px-3 py-1.5 rounded border border-slate-600 flex items-center gap-2 transition-all ${shareState === 'copied' ? 'bg-green-700 hover:bg-green-600 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'}`}
+             >
+                 {shareState === 'copied' ? <Icons.CheckCircle size={14} /> : <Icons.Share2 size={14} />}
+                 {shareState === 'copied' ? 'Link Copiado!' : 'Compartilhar'}
+             </button>
+
+             {/* EXPORT BUTTON */}
              <button className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 px-4 py-1.5 rounded text-xs font-bold uppercase tracking-wide flex items-center gap-2">
                  <Icons.Download size={14} /> Exportar
              </button>

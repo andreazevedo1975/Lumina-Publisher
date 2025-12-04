@@ -45,7 +45,8 @@ const SidebarLeft: React.FC<SidebarLeftProps> = ({ project, onPageSelect, onAddP
       setReferenceImage(url);
       setAssetTab('create');
       setCreationMode('ai');
-      setPrompt('Transforme esta imagem: ');
+      setPrompt('');
+      setGeneratedImage(null);
   };
 
   const handleGenerateImage = async () => {
@@ -153,7 +154,7 @@ const SidebarLeft: React.FC<SidebarLeftProps> = ({ project, onPageSelect, onAddP
                     onClick={() => setAssetTab('create')}
                     className={`flex-1 py-1.5 text-xs rounded transition-all flex items-center justify-center gap-1 ${assetTab === 'create' ? 'bg-slate-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                 >
-                    <Icons.ImagePlus size={12} /> Novo
+                    <Icons.ImagePlus size={12} /> {referenceImage ? 'Editor IA' : 'Novo'}
                 </button>
             </div>
 
@@ -190,9 +191,9 @@ const SidebarLeft: React.FC<SidebarLeftProps> = ({ project, onPageSelect, onAddP
                                 <button
                                     onClick={(e) => { e.stopPropagation(); handleEditAsset(url); }}
                                     className="px-2 py-1 bg-blue-600 hover:bg-blue-500 rounded text-white text-[10px] font-bold shadow-lg transition-colors flex items-center gap-1"
-                                    title="Editar via IA"
+                                    title="Abrir no Editor IA"
                                 >
-                                    <Icons.Edit size={10} /> Editar
+                                    <Icons.Edit size={10} /> Editar com IA
                                 </button>
                                 <button
                                     onClick={(e) => {
@@ -219,29 +220,31 @@ const SidebarLeft: React.FC<SidebarLeftProps> = ({ project, onPageSelect, onAddP
                 </>
             ) : (
                 <div className="flex flex-col gap-4">
-                    {/* Creation Source Switch */}
-                     <div className="flex gap-4 border-b border-slate-700 pb-2">
-                        <label className="flex items-center gap-2 text-xs cursor-pointer">
-                            <input 
-                                type="radio" 
-                                name="creationMode" 
-                                checked={creationMode === 'upload' && !referenceImage} 
-                                onChange={() => { setCreationMode('upload'); setReferenceImage(null); }}
-                                className="accent-blue-500"
-                            />
-                            <span>Upload Arquivo</span>
-                        </label>
-                        <label className="flex items-center gap-2 text-xs cursor-pointer">
-                            <input 
-                                type="radio" 
-                                name="creationMode" 
-                                checked={creationMode === 'ai'} 
-                                onChange={() => setCreationMode('ai')}
-                                className="accent-purple-500"
-                            />
-                            <span className="flex items-center gap-1 text-purple-400 font-medium"><Icons.Sparkles size={10} /> {referenceImage ? 'Editor IA' : 'Criar com IA'}</span>
-                        </label>
-                     </div>
+                    {/* Creation Source Switch - Hide when in Edit Mode for clarity */}
+                     {!referenceImage && (
+                         <div className="flex gap-4 border-b border-slate-700 pb-2">
+                            <label className="flex items-center gap-2 text-xs cursor-pointer">
+                                <input 
+                                    type="radio" 
+                                    name="creationMode" 
+                                    checked={creationMode === 'upload'} 
+                                    onChange={() => setCreationMode('upload')}
+                                    className="accent-blue-500"
+                                />
+                                <span>Upload Arquivo</span>
+                            </label>
+                            <label className="flex items-center gap-2 text-xs cursor-pointer">
+                                <input 
+                                    type="radio" 
+                                    name="creationMode" 
+                                    checked={creationMode === 'ai'} 
+                                    onChange={() => setCreationMode('ai')}
+                                    className="accent-purple-500"
+                                />
+                                <span className="flex items-center gap-1 text-purple-400 font-medium"><Icons.Sparkles size={10} /> Criar com IA</span>
+                            </label>
+                         </div>
+                     )}
 
                      {creationMode === 'upload' && !referenceImage ? (
                          <div className="flex flex-col gap-4 items-center justify-center border-2 border-dashed border-slate-700 rounded-lg p-6 hover:border-slate-500 transition-colors bg-slate-800/50">
@@ -265,29 +268,34 @@ const SidebarLeft: React.FC<SidebarLeftProps> = ({ project, onPageSelect, onAddP
                          </div>
                      ) : (
                          <div className="flex flex-col gap-3">
-                             {referenceImage && (
-                                 <div className="bg-purple-900/20 border border-purple-500/30 rounded p-2 mb-2">
-                                     <div className="flex justify-between items-center mb-2">
-                                        <span className="text-[10px] uppercase font-bold text-purple-400 flex items-center gap-1">
-                                            <Icons.Edit size={10} /> Modo Editor de Imagem
+                             {referenceImage ? (
+                                 <div className="bg-purple-900/20 border border-purple-500/30 rounded p-3 mb-2 animate-in fade-in slide-in-from-right-4">
+                                     <div className="flex justify-between items-center mb-3 border-b border-purple-500/20 pb-2">
+                                        <span className="text-[11px] uppercase font-bold text-purple-300 flex items-center gap-1.5">
+                                            <Icons.Edit size={12} /> Modo Editor de Imagem
                                         </span>
                                         <button 
                                             onClick={() => { setReferenceImage(null); setPrompt(''); }}
-                                            className="text-[10px] text-slate-400 hover:text-white underline"
+                                            className="text-[10px] text-slate-400 hover:text-white flex items-center gap-1"
                                         >
-                                            Cancelar Edição
+                                            <Icons.Trash2 size={10} /> Cancelar
                                         </button>
                                      </div>
-                                     <div className="relative rounded overflow-hidden aspect-video bg-black/50">
-                                         <img src={referenceImage} alt="Ref" className="w-full h-full object-contain opacity-80" />
+                                     <div className="relative rounded overflow-hidden aspect-video bg-black/50 border border-slate-700">
+                                         <img src={referenceImage} alt="Ref" className="w-full h-full object-contain" />
+                                         <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent pointer-events-none"></div>
+                                         <span className="absolute bottom-2 left-2 text-[10px] text-white/80 bg-black/40 px-1.5 rounded">Imagem Original</span>
                                      </div>
+                                     <p className="text-[10px] text-purple-300 mt-2 leading-relaxed">
+                                         Descreva abaixo as alterações que deseja fazer nesta imagem.
+                                     </p>
                                  </div>
-                             )}
+                             ) : null}
 
                              <label className="text-xs text-slate-400 font-medium">Prompt de Comando</label>
                              <textarea 
                                 className="w-full bg-slate-800 border border-slate-700 rounded text-xs p-2 min-h-[80px] text-slate-300 focus:border-purple-500 outline-none resize-none"
-                                placeholder={referenceImage ? "Ex: Mude o fundo para uma floresta, adicione óculos de sol..." : "Descreva a imagem que você deseja criar..."}
+                                placeholder={referenceImage ? "Ex: Mude o fundo para uma floresta, adicione óculos de sol, deixe em preto e branco..." : "Descreva a imagem que você deseja criar com detalhes..."}
                                 value={prompt}
                                 onChange={(e) => setPrompt(e.target.value)}
                              />
@@ -316,7 +324,7 @@ const SidebarLeft: React.FC<SidebarLeftProps> = ({ project, onPageSelect, onAddP
                                 className="w-full py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold rounded shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all mt-2"
                              >
                                  {isGenerating ? (
-                                     <><Icons.Loader2 size={14} className="animate-spin" /> {referenceImage ? 'Editando...' : 'Gerando...'}</>
+                                     <><Icons.Loader2 size={14} className="animate-spin" /> {referenceImage ? 'Processando Edição...' : 'Gerando...'}</>
                                  ) : (
                                      <><Icons.Wand2 size={14} /> {referenceImage ? 'Aplicar Alterações' : 'Gerar Imagem'}</>
                                  )}

@@ -44,17 +44,31 @@ export const generateAltText = async (imageBase64: string): Promise<string> => {
   }
 };
 
-export const suggestCopyEdit = async (text: string): Promise<string> => {
+export const suggestCopyEdit = async (content: string): Promise<string> => {
     try {
         const ai = getAI();
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: `Atue como um revisor de texto sênior. Melhore o texto a seguir para clareza, fluidez e gramática correta, mas mantenha a voz do autor. Retorne apenas o texto corrigido em Português do Brasil. Texto: "${text}"`,
+            contents: `Atue como um revisor de texto sênior. Melhore o conteúdo a seguir para clareza, fluidez e gramática correta, mantendo a voz do autor.
+            
+            O conteúdo está em formato HTML. Você DEVE:
+            1. Preservar todas as tags HTML (como <p>, <h1>, <strong>, <em>, <ul>, etc) EXATAMENTE como estão.
+            2. Manter a estrutura hierárquica.
+            3. Apenas corrigir e melhorar o texto legível dentro das tags.
+            4. Responder em Português do Brasil.
+            5. Retornar APENAS o HTML resultante, sem explicações e sem blocos de código markdown (\`\`\`html).
+
+            Conteúdo HTML: "${content}"`,
         });
-        return response.text || text;
+        
+        let cleaned = response.text || content;
+        // Clean up if Gemini wraps in code blocks despite instructions
+        cleaned = cleaned.replace(/^```html\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
+        
+        return cleaned;
     } catch (error) {
         console.error("Gemini Copy Edit Error:", error);
-        return text;
+        return content;
     }
 }
 
@@ -63,12 +77,24 @@ export const runPreflightCheck = async (documentSummary: string): Promise<string
         const ai = getAI();
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: `Analise este resumo da estrutura do ebook quanto à acessibilidade e melhores práticas de layout (padrões EPUB3). Aponte possíveis problemas com hierarquia ou metadados ausentes. Responda em Português do Brasil. Resumo: ${documentSummary}`,
+            contents: `Atue como um editor de livros experiente e amigável. Analise o resumo deste projeto de ebook.
+            
+            Seu objetivo é dar um feedback simples e direto para um autor que NÃO entende de programação ou termos técnicos (como HTML, CSS, ARIA, Tags).
+            
+            Foque em:
+            1. Legibilidade (tamanho do livro, quantidade de conteúdo).
+            2. Experiência do leitor (se há imagens, se os capítulos parecem organizados).
+            3. Dicas visuais simples.
+
+            Use uma linguagem encorajadora. Use listas com bolinhas para facilitar a leitura.
+            Responda em Português do Brasil.
+            
+            Resumo do Projeto: ${documentSummary}`,
         });
-        return response.text || "Nenhum problema encontrado.";
+        return response.text || "Tudo parece ótimo com seu livro!";
     } catch (error) {
          console.error("Gemini Preflight Error:", error);
-         return "Erro na verificação. API Key inválida?";
+         return "Não foi possível completar a verificação no momento.";
     }
 }
 
@@ -151,11 +177,43 @@ export const generateImage = async (prompt: string, referenceImageUrl?: string):
     }
 };
 
-export const parseDocumentToMarkdown = async (file: File): Promise<string> => {
-  const apiKey = getApiKey();
-  if (!apiKey) throw new Error("API Key ausente. Configure sua chave de API.");
+// Helper to convert HTML from Mammoth to Markdown-like structure locally
+const cleanDocxHtmlToMarkdown = (html: string): string => {
+    let text = html;
+    
+    // Headers to Markdown (preserving content)
+    text = text.replace(/<h1[^>]*>(.*?)<\/h1>/gi, (match, content) => `\n# ${content.replace(/<[^>]+>/g, '')}\n\n`);
+    text = text.replace(/<h2[^>]*>(.*?)<\/h2>/gi, (match, content) => `\n## ${content.replace(/<[^>]+>/g, '')}\n\n`);
+    text = text.replace(/<h3[^>]*>(.*?)<\/h3>/gi, (match, content) => `\n### ${content.replace(/<[^>]+>/g, '')}\n\n`);
+    text = text.replace(/<h[4-6][^>]*>(.*?)<\/h[4-6]>/gi, (match, content) => `\n#### ${content.replace(/<[^>]+>/g, '')}\n\n`);
 
-  // Handle DOCX files using local conversion (Mammoth global) + Gemini Formatting
+    // Paragraphs and breaks
+    text = text.replace(/<\/p>/gi, '\n\n');
+    text = text.replace(/<\/div>/gi, '\n\n');
+    text = text.replace(/<br\s*\/?>/gi, '\n');
+    
+    // Remove scripts and styles
+    text = text.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gmi, "");
+    text = text.replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gmi, "");
+
+    // Strip remaining tags
+    text = text.replace(/<[^>]+>/g, ' '); 
+    
+    // Decode entities
+    text = text.replace(/&nbsp;/g, ' ');
+    text = text.replace(/&amp;/g, '&');
+    text = text.replace(/&lt;/g, '<');
+    text = text.replace(/&gt;/g, '>');
+    text = text.replace(/&quot;/g, '"');
+    text = text.replace(/\s+/g, ' '); // Normalize whitespace
+
+    return text.trim();
+}
+
+export const parseDocumentToMarkdown = async (file: File): Promise<{ text: string, images: string[] }> => {
+  const apiKey = getApiKey();
+
+  // Handle DOCX files
   if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || file.name.endsWith('.docx')) {
       return new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -164,33 +222,26 @@ export const parseDocumentToMarkdown = async (file: File): Promise<string> => {
                   if (!e.target?.result) throw new Error("Falha ao ler o arquivo");
                   const arrayBuffer = e.target.result as ArrayBuffer;
                   
-                  // Access mammoth from global window object (loaded via script tag)
                   // @ts-ignore
                   const mammoth = window.mammoth;
-                  
                   if (!mammoth) throw new Error("Biblioteca Mammoth não carregada.");
 
-                  // Extract raw text from DOCX
-                  const result = await mammoth.extractRawText({ arrayBuffer });
-                  const rawText = result.value;
+                  const result = await mammoth.convertToHtml({ arrayBuffer });
+                  const rawHtml = result.value;
+                  const images: string[] = [];
 
-                  // Use Gemini to structure the raw text into Markdown
-                  const ai = getAI();
-                  const model = 'gemini-2.5-flash';
-                  const response = await ai.models.generateContent({
-                      model,
-                      contents: `Atue como um diagramador profissional. O texto a seguir foi extraído de um arquivo DOCX. Sua tarefa é formatá-lo em Markdown limpo para um Ebook.
-                      
-                      Regras:
-                      1. Identifique Títulos e Capítulos e use headers (# Título, ## Capítulo).
-                      2. Mantenha os parágrafos separados corretamente.
-                      3. Não resuma o texto, mantenha o conteúdo integral.
-                      
-                      Texto: 
-                      ${rawText.substring(0, 60000)}` // Context limit safety
+                  // Extract images
+                  const parser = new DOMParser();
+                  const doc = parser.parseFromString(rawHtml, 'text/html');
+                  const imgElements = doc.querySelectorAll('img');
+                  imgElements.forEach((img: HTMLImageElement) => {
+                      if (img.src && img.src.startsWith('data:image')) {
+                          images.push(img.src);
+                      }
                   });
-                  
-                  resolve(response.text || rawText);
+
+                  const markdownText = cleanDocxHtmlToMarkdown(rawHtml);
+                  resolve({ text: markdownText, images });
               } catch (error) {
                   console.error("DOCX Processing Error:", error);
                   reject(error);
@@ -201,39 +252,43 @@ export const parseDocumentToMarkdown = async (file: File): Promise<string> => {
       });
   }
 
-  // Handle PDF files (Native Gemini Support)
+  // Handle PDF files using local PDF.js (No Token Limits)
   if (file.type === 'application/pdf') {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onloadend = async () => {
-          const base64Data = (reader.result as string).split(',')[1];
-          try {
-            const ai = getAI();
-            const model = 'gemini-2.5-flash';
-            const response = await ai.models.generateContent({
-              model,
-              contents: {
-                parts: [
-                  {
-                    inlineData: {
-                      mimeType: 'application/pdf',
-                      data: base64Data,
-                    },
-                  },
-                  {
-                    text: 'Aja como um motor de ingestão de livros. Extraia todo o conteúdo de texto deste documento. Mantenha a estrutura hierárquica usando cabeçalhos Markdown (# para Títulos, ## para Capítulos/Seções). Preserve todos os parágrafos originais. Não faça resumos, preciso do texto completo. Se houver imagens, ignore-as, foque no texto. Retorne apenas o texto formatado em Markdown.',
-                  },
-                ],
-              },
-            });
-            resolve(response.text || "");
-          } catch (error) {
-            console.error("Gemini Parse Error (PDF):", error);
-            reject(error);
-          }
+        reader.onload = async (e) => {
+            try {
+                if (!e.target?.result) throw new Error("Falha ao ler o PDF");
+                const typedarray = new Uint8Array(e.target.result as ArrayBuffer);
+
+                // @ts-ignore
+                const pdfjsLib = window.pdfjsLib;
+                if (!pdfjsLib) throw new Error("Biblioteca PDF.js não carregada.");
+
+                const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                const numPages = pdf.numPages;
+                const textPages: string[] = [];
+
+                // Iterate over all pages
+                for (let i = 1; i <= numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const textContent = await page.getTextContent();
+                    // Join with newlines to preserve paragraph/line structure
+                    const pageText = textContent.items.map((item: any) => item.str).join('\n');
+                    textPages.push(pageText);
+                }
+                
+                // Combine all pages with double newlines
+                const fullText = textPages.join('\n\n');
+
+                resolve({ text: fullText, images: [] });
+            } catch (error) {
+                console.error("PDF Processing Error:", error);
+                reject(error);
+            }
         };
         reader.onerror = (error) => reject(error);
-        reader.readAsDataURL(file);
+        reader.readAsArrayBuffer(file);
       });
   }
 

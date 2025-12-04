@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { 
   Type, 
@@ -44,7 +45,8 @@ import {
   ListOrdered,
   Indent,
   Outdent,
-  Eraser
+  Eraser,
+  Share2
 } from 'lucide-react';
 
 export const Icons = {
@@ -92,5 +94,6 @@ export const Icons = {
   ListOrdered,
   Indent,
   Outdent,
-  Eraser
+  Eraser,
+  Share2
 };
